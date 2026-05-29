@@ -1016,19 +1016,27 @@ function App() {
             h('button', { className: 'mobile-only', onClick: () => setMobileView('list'), style: { position: 'absolute', top: 20, left: 20, background: 'none', border: 'none', fontSize: 32, padding: '0 10px', cursor: 'pointer', color: '#64748b' } }, '‹'),
             h('div', { style: { fontSize: 48 } }, '📝'), h('p', null, '選擇左側筆記，或建立新筆記'))
         : h('div', { style: S.editor },
-            h('div', { style: S.editorTop },
+h('div', { style: S.editorTop },
               // 👇 手機版返回按鈕
               h('button', { className: 'mobile-only', onClick: () => setMobileView('list'), style: { background: 'none', border: 'none', fontSize: 28, padding: '0 8px 0 0', cursor: 'pointer', color: '#64748b' } }, '‹'),
               h('input', { value: activeNote.title || '', onChange: (e) => updateNoteFields({ title: e.target.value }), placeholder: '筆記標題', style: S.titleInput }),
               h('div', { style: { display: "flex", gap: 8 } },
                 h('button', { onClick: manualSaveNote, style: { ...S.primaryBtnSm, background: '#3b82f6' } }, '💾 儲存'),
-                h('button', { onClick: () => fileRef.current.click(), disabled: uploading, style: S.ghostBtn }, uploading ? '處理中…' : '📷 加照片'),
+                
+                // 👇 [修改這裡] 改用 <label> 原生標籤來觸發，並移除 capture，確保手機 100% 能打開相簿與相機選單
+                h('label', { style: { ...S.ghostBtn, opacity: uploading ? 0.5 : 1, pointerEvents: uploading ? 'none' : 'auto', margin: 0 } },
+                  uploading ? '處理中…' : '📷 加照片',
+                  h('input', { type: 'file', accept: 'image/*', multiple: true, onChange: onPickImage, style: { display: 'none' } })
+                ),
+
                 confirmDel?.type === "note" && confirmDel.id === activeNote.id
                   ? h('span', { style: { display: 'flex', gap: 8 } },
                       h('button', { onClick: () => trashNote(activeNote.id), style: S.dangerBtn }, '確定刪除'),
                       h('button', { onClick: () => setConfirmDel(null), style: S.ghostBtn }, '✕'))
                   : h('button', { onClick: () => setConfirmDel({ type: "note", id: activeNote.id }), style: S.dangerBtn }, '🗑')
-              ),
+              )
+              // 💡 註：原本放在最外面的 h('input', { ref: fileRef ... }) 已經被移到上面了
+            ),
               h('input', { ref: fileRef, type: 'file', accept: 'image/*', multiple: true, capture: 'environment', onChange: onPickImage, style: { display: 'none' } })
             ),
             h('div', { style: S.editorDate },
