@@ -616,37 +616,54 @@ function App() {
     return unsub;
   }, []);
 
-  useEffect(() => {
-    if (!user) { setProjects([]); return; }
-    const q = query(collection(db, `users/${user.uid}/projects`), orderBy("created", "desc"));
-    return onSnapshot(q, (snap) => setProjects(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-  }, [user]);
-
-  useEffect(() => {
+useEffect(() => {
     if (!user || !activeProject) { setNotes([]); return; }
+    // 移除了 orderBy，避免 Firebase 的複合索引限制
     const q = query(
       collection(db, `users/${user.uid}/notes`),
-      where("projectId", "==", activeProject.id),
-      orderBy("updated", "desc")
+      where("projectId", "==", activeProject.id)
     );
     return onSnapshot(q, (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      
+      // 改在本地端用 JavaScript 處理排序 (時間新的排在上面)
+      list.sort((a, b) => {
+        const tA = a.updated?.toMillis ? a.updated.toMillis() : Date.now();
+        const tB = b.updated?.toMillis ? b.updated.toMillis() : Date.now();
+        return tB - tA;
+      });
+      
       setNotes(list);
       if (activeNote && Date.now() - lastLocalEdit.current > 1500) {
         const fresh = list.find(n => n.id === activeNote.id);
         if (fresh) setActiveNote(fresh);
       }
+    }, (err) => {
+      console.error("讀取筆記失敗:", err); // 若有錯誤會顯示在 F12 控制台
     });
   }, [user, activeProject]);
 
-  useEffect(() => {
+useEffect(() => {
     if (!user || !activeProject) { setTasks([]); return; }
+    // 移除了 orderBy，避免 Firebase 的複合索引限制
     const q = query(
       collection(db, `users/${user.uid}/tasks`),
-      where("projectId", "==", activeProject.id),
-      orderBy("created", "desc")
+      where("projectId", "==", activeProject.id)
     );
-    return onSnapshot(q, (snap) => setTasks(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    return onSnapshot(q, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      
+      // 改在本地端用 JavaScript 處理排序 (時間新的排在上面)
+      list.sort((a, b) => {
+        const tA = a.created?.toMillis ? a.created.toMillis() : Date.now();
+        const tB = b.created?.toMillis ? b.created.toMillis() : Date.now();
+        return tB - tA;
+      });
+      
+      setTasks(list);
+    }, (err) => {
+      console.error("讀取任務失敗:", err);
+    });
   }, [user, activeProject]);
 
   useEffect(() => {
