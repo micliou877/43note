@@ -1,0 +1,710 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="照片筆記" />
+<meta name="theme-color" content="#0d9488" />
+<title>照片筆記</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif; }
+  input, textarea, button { font-family: inherit; }
+  textarea::-webkit-scrollbar { width: 8px; }
+  textarea::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.3.1",
+    "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+    "firebase/app": "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js",
+    "firebase/auth": "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js",
+    "firebase/firestore": "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js",
+    "firebase/storage": "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js"
+  }
+}
+</script>
+
+<script type="module">
+import React, { useState, useRef, useEffect, useCallback } from "react";
+import { createRoot } from "react-dom/client";
+import { initializeApp } from "firebase/app";
+import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
+import { getFirestore, collection, query, orderBy, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, serverTimestamp, writeBatch, getDocs } from "firebase/firestore";
+import { getStorage, ref as sref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
+
+// ════════════════════════════════════════════════════════════════
+// 👇 把這六行換成你自己的 Firebase 設定（看 Firebase Console → 專案設定）
+// ════════════════════════════════════════════════════════════════
+const firebaseConfig = {
+  apiKey: "貼這裡",
+  authDomain: "貼這裡.firebaseapp.com",
+  projectId: "貼這裡",
+  storageBucket: "貼這裡.appspot.com",
+  messagingSenderId: "貼這裡",
+  appId: "貼這裡"
+};
+// ════════════════════════════════════════════════════════════════
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const storage = getStorage(app);
+const googleProvider = new GoogleAuthProvider();
+
+const h = React.createElement;
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const COLORS = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#111827", "#ffffff"];
+const fmt = (ts) => {
+  if (!ts) return "";
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
+
+const S = {
+  app: { display: "flex", height: "100vh", background: "#f8fafc", color: "#1f2937", fontSize: 14 },
+  sidebar: { width: 230, background: "#fff", borderRight: "1px solid #e5e7eb", display: "flex", flexDirection: "column", padding: 14 },
+  brand: { display: "flex", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 16, marginBottom: 16, color: "#0f172a" },
+  newProjBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px", background: "#0d9488", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: 13 },
+  newProjForm: { display: "flex", gap: 4, alignItems: "center" },
+  newProjField: { flex: 1, padding: "8px 10px", border: "1px solid #0d9488", borderRadius: 8, outline: "none", fontSize: 13 },
+  miniBtn: { display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, border: "none", borderRadius: 7, cursor: "pointer", fontSize: 14 },
+  projItem: { display: "flex", alignItems: "center", gap: 8, padding: "9px 10px", borderRadius: 8, cursor: "pointer", marginTop: 2 },
+  projItemActive: { background: "#f0fdfa" },
+  listCol: { width: 290, background: "#fff", borderRight: "1px solid #e5e7eb", display: "flex", flexDirection: "column" },
+  listHead: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", borderBottom: "1px solid #f1f5f9" },
+  searchBox: { display: "flex", alignItems: "center", gap: 6, margin: "10px 14px", padding: "7px 10px", background: "#f1f5f9", borderRadius: 8 },
+  searchInput: { border: "none", background: "transparent", outline: "none", flex: 1, fontSize: 13 },
+  noteItem: { padding: "12px 16px", borderBottom: "1px solid #f8fafc", cursor: "pointer" },
+  noteItemActive: { background: "#f0fdfa", borderLeft: "3px solid #0d9488" },
+  imgBadge: { display: "inline-flex", alignItems: "center", gap: 3, fontSize: 11, color: "#0d9488", background: "#f0fdfa", padding: "1px 6px", borderRadius: 10 },
+  notePreview: { fontSize: 12.5, color: "#6b7280", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  noteDate: { fontSize: 11, color: "#cbd5e1", marginTop: 6 },
+  editorCol: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" },
+  editor: { flex: 1, display: "flex", flexDirection: "column", padding: "20px 28px", overflowY: "auto" },
+  editorTop: { display: "flex", gap: 12, alignItems: "center" },
+  titleInput: { flex: 1, fontSize: 22, fontWeight: 700, border: "none", outline: "none", background: "transparent", color: "#0f172a" },
+  editorDate: { fontSize: 11.5, color: "#9ca3af", marginTop: 4, marginBottom: 14 },
+  bodyArea: { width: "100%", minHeight: 180, border: "1px solid #e5e7eb", borderRadius: 10, padding: 14, fontSize: 14.5, lineHeight: 1.7, resize: "vertical", outline: "none", color: "#374151" },
+  imgGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14, marginTop: 18 },
+  imgCard: { border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden", background: "#fff" },
+  thumb: { width: "100%", display: "block", cursor: "pointer", maxHeight: 200, objectFit: "cover" },
+  imgActions: { display: "flex", gap: 6, padding: 8, borderTop: "1px solid #f1f5f9" },
+  imgActBtn: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, padding: "5px 9px", border: "1px solid #e5e7eb", borderRadius: 7, background: "#fff", cursor: "pointer", textDecoration: "none", color: "#374151" },
+  placeholder: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, color: "#9ca3af" },
+  empty: { padding: 20, textAlign: "center", color: "#cbd5e1", fontSize: 13 },
+  primaryBtn: { display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", background: "#0d9488", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: 13 },
+  primaryBtnSm: { display: "inline-flex", alignItems: "center", gap: 4, padding: "6px 12px", background: "#0d9488", color: "#fff", border: "none", borderRadius: 7, cursor: "pointer", fontWeight: 600, fontSize: 12.5 },
+  ghostBtn: { display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", background: "#fff", color: "#374151", border: "1px solid #d1d5db", borderRadius: 8, cursor: "pointer", fontSize: 13 },
+  dangerBtn: { display: "inline-flex", alignItems: "center", padding: "8px 12px", background: "#fff", color: "#ef4444", border: "1px solid #fecaca", borderRadius: 8, cursor: "pointer", fontSize: 13 },
+  modalOverlay: { position: "fixed", inset: 0, background: "rgba(15,23,42,.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20 },
+  annotatorBox: { background: "#1e293b", borderRadius: 14, maxWidth: "95vw", maxHeight: "95vh", display: "flex", flexDirection: "column", overflow: "hidden" },
+  annotatorBar: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, padding: "12px 16px", background: "#0f172a", flexWrap: "wrap" },
+  toolBtn: { display: "flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, background: "#334155", color: "#cbd5e1", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 16 },
+  toolBtnActive: { background: "#0d9488", color: "#fff" },
+  swatch: { width: 22, height: 22, borderRadius: "50%", border: "none", cursor: "pointer", padding: 0 },
+  canvasWrap: { padding: 16, overflow: "auto", display: "flex", justifyContent: "center", background: "#0f172a" },
+  userBar: { display: "flex", alignItems: "center", gap: 8, padding: "10px 8px", borderTop: "1px solid #f1f5f9", marginTop: 8 },
+  userInfo: { display: "flex", alignItems: "center", gap: 8, flex: 1, overflow: "hidden" },
+  avatar: { width: 26, height: 26, borderRadius: "50%" },
+  userName: { fontSize: 12, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+};
+
+// ─────────────────────────────────────────────────────────────
+// 登入頁
+// ─────────────────────────────────────────────────────────────
+function Login() {
+  const [email, setEmail] = useState('');
+  const [pwd, setPwd] = useState('');
+  const [isSignup, setIsSignup] = useState(false);
+  const [err, setErr] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const google = async () => {
+    setErr(''); setLoading(true);
+    try { await signInWithPopup(auth, googleProvider); }
+    catch (e) { setErr(e.message); }
+    finally { setLoading(false); }
+  };
+
+  const emailLogin = async (e) => {
+    e.preventDefault();
+    setErr(''); setLoading(true);
+    try {
+      if (isSignup) await createUserWithEmailAndPassword(auth, email, pwd);
+      else await signInWithEmailAndPassword(auth, email, pwd);
+    } catch (e) { setErr(e.message); }
+    finally { setLoading(false); }
+  };
+
+  const L = {
+    wrap: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', padding: 20 },
+    card: { background: '#fff', padding: '40px 32px', borderRadius: 14, boxShadow: '0 4px 20px rgba(0,0,0,.06)', width: '100%', maxWidth: 380 },
+    title: { textAlign: 'center', fontSize: 24, margin: '0 0 6px', color: '#0f172a' },
+    sub: { textAlign: 'center', fontSize: 13, color: '#64748b', marginBottom: 24, marginTop: 0 },
+    googleBtn: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, width: '100%', padding: '11px', background: '#fff', color: '#334155', border: '1px solid #d1d5db', borderRadius: 10, cursor: 'pointer', fontSize: 14, fontWeight: 500 },
+    divider: { display: 'flex', alignItems: 'center', margin: '20px 0', gap: 10 },
+    line: { flex: 1, height: 1, background: '#e5e7eb' },
+    dt: { color: '#94a3b8', fontSize: 12 },
+    input: { width: '100%', padding: '11px 14px', border: '1px solid #d1d5db', borderRadius: 10, fontSize: 14, marginBottom: 10, outline: 'none' },
+    primaryBtn: { width: '100%', padding: '11px', background: '#0d9488', color: '#fff', border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 14, fontWeight: 600 },
+    linkBtn: { width: '100%', marginTop: 16, padding: 8, background: 'none', border: 'none', color: '#0d9488', cursor: 'pointer', fontSize: 13 },
+    err: { marginTop: 14, padding: 10, background: '#fef2f2', color: '#991b1b', borderRadius: 8, fontSize: 12.5 },
+  };
+
+  return h('div', { style: L.wrap },
+    h('div', { style: L.card },
+      h('h1', { style: L.title }, '照片筆記'),
+      h('p', { style: L.sub }, '登入後可在電腦和手機間同步'),
+      h('button', { onClick: google, disabled: loading, style: L.googleBtn },
+        h('span', { style: { fontSize: 16 } }, 'G'),
+        '使用 Google 登入'
+      ),
+      h('div', { style: L.divider },
+        h('div', { style: L.line }), h('span', { style: L.dt }, '或'), h('div', { style: L.line })
+      ),
+      h('form', { onSubmit: emailLogin },
+        h('input', { type: 'email', placeholder: '電子郵件', value: email, onChange: e => setEmail(e.target.value), required: true, style: L.input }),
+        h('input', { type: 'password', placeholder: '密碼 (至少 6 字)', value: pwd, onChange: e => setPwd(e.target.value), required: true, minLength: 6, style: L.input }),
+        h('button', { type: 'submit', disabled: loading, style: L.primaryBtn }, loading ? '處理中…' : (isSignup ? '建立帳號' : '登入'))
+      ),
+      h('button', { onClick: () => setIsSignup(!isSignup), style: L.linkBtn }, isSignup ? '已有帳號？登入' : '沒有帳號？建立新帳號'),
+      err && h('div', { style: L.err }, err)
+    )
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// 照片標註器
+// ─────────────────────────────────────────────────────────────
+function PhotoAnnotator({ src, initialStrokes, onSave, onClose }) {
+  const canvasRef = useRef(null);
+  const imgRef = useRef(null);
+  const [tool, setTool] = useState("pen");
+  const [color, setColor] = useState("#ef4444");
+  const [width, setWidth] = useState(4);
+  const [strokes, setStrokes] = useState((initialStrokes || []).filter(Boolean));
+  const [drawing, setDrawing] = useState(false);
+  const cur = useRef(null);
+  const [textInput, setTextInput] = useState(null);
+  const [imgDims, setImgDims] = useState({ w: 0, h: 0 });
+
+  useEffect(() => {
+    const img = document.createElement("img");
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const maxW = 1400;
+      const scale = Math.min(1, maxW / img.width);
+      setImgDims({ w: img.width * scale, h: img.height * scale });
+      imgRef.current = img;
+    };
+    img.src = src;
+  }, [src]);
+
+  const drawStroke = (ctx, s) => {
+    if (!s || !s.color) return;
+    ctx.strokeStyle = s.color;
+    ctx.fillStyle = s.color;
+    ctx.lineWidth = s.width;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    if (s.type === "pen") {
+      ctx.beginPath();
+      s.points.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      ctx.stroke();
+    } else if (s.type === "rect") {
+      ctx.strokeRect(s.x0, s.y0, s.x1 - s.x0, s.y1 - s.y0);
+    } else if (s.type === "arrow") {
+      const head = 10 + s.width * 2;
+      const ang = Math.atan2(s.y1 - s.y0, s.x1 - s.x0);
+      ctx.beginPath(); ctx.moveTo(s.x0, s.y0); ctx.lineTo(s.x1, s.y1); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(s.x1, s.y1);
+      ctx.lineTo(s.x1 - head * Math.cos(ang - Math.PI / 6), s.y1 - head * Math.sin(ang - Math.PI / 6));
+      ctx.lineTo(s.x1 - head * Math.cos(ang + Math.PI / 6), s.y1 - head * Math.sin(ang + Math.PI / 6));
+      ctx.closePath(); ctx.fill();
+    } else if (s.type === "text") {
+      ctx.font = `${s.size}px -apple-system, "PingFang TC", sans-serif`;
+      ctx.textBaseline = "top";
+      ctx.fillText(s.text, s.x, s.y);
+    }
+  };
+
+  const redraw = useCallback(() => {
+    const c = canvasRef.current;
+    if (!c || !imgRef.current) return;
+    const ctx = c.getContext("2d");
+    ctx.clearRect(0, 0, c.width, c.height);
+    ctx.drawImage(imgRef.current, 0, 0, c.width, c.height);
+    const all = cur.current ? [...strokes, cur.current] : strokes;
+    for (const s of all) drawStroke(ctx, s);
+  }, [strokes]);
+
+  useEffect(() => { redraw(); }, [redraw, imgDims]);
+
+  const pos = (e) => {
+    const r = canvasRef.current.getBoundingClientRect();
+    const t = e.touches ? e.touches[0] : e;
+    return {
+      x: (t.clientX - r.left) * (canvasRef.current.width / r.width),
+      y: (t.clientY - r.top) * (canvasRef.current.height / r.height),
+    };
+  };
+
+  const nearStroke = (s, p) => {
+    if (!s) return false;
+    const d = 12;
+    if (s.type === "pen") return s.points.some((pt) => Math.hypot(pt.x - p.x, pt.y - p.y) < d);
+    if (s.type === "text") return Math.abs(p.x - s.x) < 120 && Math.abs(p.y - s.y) < s.size + 6;
+    const minX = Math.min(s.x0, s.x1) - d, maxX = Math.max(s.x0, s.x1) + d;
+    const minY = Math.min(s.y0, s.y1) - d, maxY = Math.max(s.y0, s.y1) + d;
+    return p.x > minX && p.x < maxX && p.y > minY && p.y < maxY;
+  };
+
+  const eraseAt = (p) => {
+    setStrokes((curr) => {
+      const hit = [...curr].reverse().find((s) => nearStroke(s, p));
+      return hit ? curr.filter((s) => s.id !== hit.id) : curr;
+    });
+  };
+
+  const start = (e) => {
+    e.preventDefault();
+    const p = pos(e);
+    if (tool === "text") { setTextInput({ x: p.x, y: p.y, value: "" }); return; }
+    if (tool === "erase") { setDrawing(true); eraseAt(p); return; }
+    setDrawing(true);
+    if (tool === "pen") cur.current = { id: uid(), type: "pen", color, width, points: [p] };
+    else cur.current = { id: uid(), type: tool, color, width, x0: p.x, y0: p.y, x1: p.x, y1: p.y };
+  };
+
+  const move = (e) => {
+    if (!drawing) return;
+    e.preventDefault();
+    const p = pos(e);
+    if (tool === "erase") { eraseAt(p); return; }
+    if (tool === "pen") cur.current.points.push(p);
+    else { cur.current.x1 = p.x; cur.current.y1 = p.y; }
+    redraw();
+  };
+
+  const end = () => {
+    if (!drawing) return;
+    setDrawing(false);
+    if (tool === "erase") return;
+    const finished = cur.current;
+    cur.current = null;
+    if (finished) setStrokes((s) => [...s, finished]);
+  };
+
+  const commitText = () => {
+    if (textInput && textInput.value.trim()) {
+      setStrokes((s) => [...s, {
+        id: uid(), type: "text", color, text: textInput.value,
+        x: textInput.x, y: textInput.y, size: Math.max(18, width * 6),
+      }]);
+    }
+    setTextInput(null);
+  };
+
+  const undo = () => setStrokes((s) => s.slice(0, -1));
+  const save = () => { cur.current = null; onSave({ strokes }); };
+
+  const tools = [
+    { id: "pen", icon: "✏️", label: "畫筆" },
+    { id: "arrow", icon: "↗", label: "箭頭" },
+    { id: "rect", icon: "▢", label: "方框" },
+    { id: "text", icon: "T", label: "文字" },
+    { id: "erase", icon: "🧽", label: "橡皮擦" },
+  ];
+
+  return h('div', { style: S.modalOverlay },
+    h('div', { style: S.annotatorBox },
+      h('div', { style: S.annotatorBar },
+        h('div', { style: { display: "flex", gap: 6 } },
+          ...tools.map((t) =>
+            h('button', { key: t.id, onClick: () => setTool(t.id), title: t.label,
+              style: { ...S.toolBtn, ...(tool === t.id ? S.toolBtnActive : {}) } }, t.icon)
+          ),
+          h('button', { onClick: undo, title: "復原", style: S.toolBtn }, '⟲')
+        ),
+        h('div', { style: { display: "flex", alignItems: "center", gap: 10 } },
+          h('div', { style: { display: "flex", gap: 5 } },
+            ...COLORS.map((c) =>
+              h('button', { key: c, onClick: () => setColor(c),
+                style: { ...S.swatch, background: c, outline: color === c ? "2px solid #fff" : "1px solid #475569", outlineOffset: 2 } })
+            )
+          ),
+          h('input', { type: "range", min: 2, max: 14, value: width,
+            onChange: (e) => setWidth(+e.target.value), style: { width: 80 } })
+        ),
+        h('div', { style: { display: "flex", gap: 8 } },
+          h('button', { onClick: onClose, style: S.ghostBtn }, '取消'),
+          h('button', { onClick: save, style: S.primaryBtn }, '✓ 完成')
+        )
+      ),
+      h('div', { style: S.canvasWrap },
+        h('div', { style: { position: "relative", width: imgDims.w, maxWidth: "100%" } },
+          h('canvas', {
+            ref: canvasRef, width: imgDims.w, height: imgDims.h,
+            style: { width: "100%", display: "block", borderRadius: 8, touchAction: "none", cursor: tool === "text" ? "text" : "crosshair" },
+            onMouseDown: start, onMouseMove: move, onMouseUp: end, onMouseLeave: end,
+            onTouchStart: start, onTouchMove: move, onTouchEnd: end
+          }),
+          textInput && h('input', {
+            autoFocus: true,
+            value: textInput.value,
+            onChange: (e) => setTextInput({ ...textInput, value: e.target.value }),
+            onBlur: commitText,
+            onKeyDown: (e) => e.key === "Enter" && commitText(),
+            placeholder: "輸入文字後按 Enter",
+            style: {
+              position: "absolute",
+              left: `${(textInput.x / imgDims.w) * 100}%`,
+              top: `${(textInput.y / imgDims.h) * 100}%`,
+              color, fontSize: 16, border: `2px solid ${color}`,
+              borderRadius: 4, padding: "2px 6px", background: "rgba(255,255,255,.95)", outline: "none",
+            }
+          })
+        )
+      )
+    )
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// 縮圖
+// ─────────────────────────────────────────────────────────────
+function ImageCard({ image, index, onAnnotate, onDelete, confirmingDelete, onConfirmDelete }) {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    const img = document.createElement('img');
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const c = canvasRef.current; if (!c) return;
+      const maxW = 400; const scale = Math.min(1, maxW / img.width);
+      c.width = img.width * scale; c.height = img.height * scale;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      const annotatorScale = Math.min(1, 1400 / img.width);
+      const ratio = c.width / (img.width * annotatorScale);
+      for (const s of (image.strokes || [])) {
+        if (!s || !s.color) continue;
+        ctx.strokeStyle = s.color; ctx.fillStyle = s.color;
+        ctx.lineWidth = s.width * ratio; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        if (s.type === 'pen') {
+          ctx.beginPath();
+          s.points.forEach((p, i) => (i ? ctx.lineTo(p.x * ratio, p.y * ratio) : ctx.moveTo(p.x * ratio, p.y * ratio)));
+          ctx.stroke();
+        } else if (s.type === 'rect') {
+          ctx.strokeRect(s.x0 * ratio, s.y0 * ratio, (s.x1 - s.x0) * ratio, (s.y1 - s.y0) * ratio);
+        } else if (s.type === 'arrow') {
+          const x0 = s.x0 * ratio, y0 = s.y0 * ratio, x1 = s.x1 * ratio, y1 = s.y1 * ratio;
+          const head = (10 + s.width * 2) * ratio;
+          const ang = Math.atan2(y1 - y0, x1 - x0);
+          ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x1 - head * Math.cos(ang - Math.PI / 6), y1 - head * Math.sin(ang - Math.PI / 6));
+          ctx.lineTo(x1 - head * Math.cos(ang + Math.PI / 6), y1 - head * Math.sin(ang + Math.PI / 6));
+          ctx.closePath(); ctx.fill();
+        } else if (s.type === 'text') {
+          ctx.font = `${s.size * ratio}px -apple-system, "PingFang TC", sans-serif`;
+          ctx.textBaseline = 'top';
+          ctx.fillText(s.text, s.x * ratio, s.y * ratio);
+        }
+      }
+    };
+    img.src = image.url;
+  }, [image.url, image.strokes]);
+
+  return h('div', { style: S.imgCard },
+    h('canvas', { ref: canvasRef, style: S.thumb, onClick: onAnnotate }),
+    h('div', { style: S.imgActions },
+      h('button', { onClick: onAnnotate, style: S.imgActBtn }, '🎨 標註'),
+      h('a', { href: image.url, download: `note-${index + 1}.jpg`, target: '_blank', rel: 'noreferrer', style: S.imgActBtn }, '⬇'),
+      confirmingDelete
+        ? h('button', { onClick: onConfirmDelete, style: { ...S.imgActBtn, color: "#ef4444", borderColor: "#fecaca" } }, '確定')
+        : h('button', { onClick: onDelete, style: { ...S.imgActBtn, color: "#ef4444" } }, '🗑')
+    )
+  );
+}
+
+function NewProjectInput({ onConfirm, onCancel }) {
+  const [val, setVal] = useState("");
+  return h('div', { style: S.newProjForm },
+    h('input', {
+      autoFocus: true, value: val,
+      onChange: (e) => setVal(e.target.value),
+      onKeyDown: (e) => {
+        if (e.key === "Enter" && val.trim()) onConfirm(val.trim());
+        if (e.key === "Escape") onCancel();
+      },
+      placeholder: "專案名稱…",
+      style: S.newProjField
+    }),
+    h('button', { onClick: () => val.trim() && onConfirm(val.trim()), style: { ...S.miniBtn, background: '#0d9488', color: '#fff' } }, '✓'),
+    h('button', { onClick: onCancel, style: { ...S.miniBtn, background: '#f1f5f9', color: '#64748b' } }, '✕')
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// 主應用
+// ─────────────────────────────────────────────────────────────
+function App() {
+  const [user, setUser] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [projects, setProjects] = useState([]);
+  const [notes, setNotes] = useState([]);
+  const [activeProject, setActiveProject] = useState(null);
+  const [activeNote, setActiveNote] = useState(null);
+  const [annotating, setAnnotating] = useState(null);
+  const [search, setSearch] = useState("");
+  const [creatingProj, setCreatingProj] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef(null);
+  const saveTimer = useRef(null);
+  const lastLocalEdit = useRef(0);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => { setUser(u); setAuthReady(true); });
+    return unsub;
+  }, []);
+
+  useEffect(() => {
+    if (!user) { setProjects([]); return; }
+    const q = query(collection(db, `users/${user.uid}/projects`), orderBy("created", "desc"));
+    return onSnapshot(q, (snap) => setProjects(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || !activeProject) { setNotes([]); return; }
+    const q = query(
+      collection(db, `users/${user.uid}/notes`),
+      where("projectId", "==", activeProject.id),
+      orderBy("updated", "desc")
+    );
+    return onSnapshot(q, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setNotes(list);
+      if (activeNote && Date.now() - lastLocalEdit.current > 1500) {
+        const fresh = list.find(n => n.id === activeNote.id);
+        if (fresh) setActiveNote(fresh);
+      }
+    });
+  }, [user, activeProject]);
+
+  const createProject = async (name) => {
+    const docRef = await addDoc(collection(db, `users/${user.uid}/projects`), { name, created: serverTimestamp() });
+    setCreatingProj(false);
+    setActiveProject({ id: docRef.id, name });
+    setActiveNote(null);
+  };
+
+  const delProject = async (id) => {
+    const q = query(collection(db, `users/${user.uid}/notes`), where("projectId", "==", id));
+    const snap = await getDocs(q);
+    for (const ds of snap.docs) {
+      for (const im of (ds.data().images || [])) {
+        if (im?.storagePath) { try { await deleteObject(sref(storage, im.storagePath)); } catch {} }
+      }
+    }
+    const batch = writeBatch(db);
+    snap.docs.forEach(d => batch.delete(d.ref));
+    batch.delete(doc(db, `users/${user.uid}/projects/${id}`));
+    await batch.commit();
+    if (activeProject?.id === id) { setActiveProject(null); setActiveNote(null); }
+    setConfirmDel(null);
+  };
+
+  const addNote = async () => {
+    const docRef = await addDoc(collection(db, `users/${user.uid}/notes`), {
+      projectId: activeProject.id, title: "", body: "", images: [],
+      created: serverTimestamp(), updated: serverTimestamp(),
+    });
+    setActiveNote({ id: docRef.id, projectId: activeProject.id, title: "", body: "", images: [] });
+  };
+
+  const updateNoteFields = (patch) => {
+    lastLocalEdit.current = Date.now();
+    setActiveNote(cur => ({ ...cur, ...patch }));
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      if (!activeNote?.id) return;
+      updateDoc(doc(db, `users/${user.uid}/notes/${activeNote.id}`), { ...patch, updated: serverTimestamp() });
+    }, 500);
+  };
+
+  const updateNoteNow = async (patch) => {
+    lastLocalEdit.current = Date.now();
+    setActiveNote(cur => ({ ...cur, ...patch }));
+    await updateDoc(doc(db, `users/${user.uid}/notes/${activeNote.id}`), { ...patch, updated: serverTimestamp() });
+  };
+
+  const delNote = async (id) => {
+    const note = notes.find(n => n.id === id);
+    if (note) {
+      for (const im of (note.images || [])) {
+        if (im?.storagePath) { try { await deleteObject(sref(storage, im.storagePath)); } catch {} }
+      }
+    }
+    await deleteDoc(doc(db, `users/${user.uid}/notes/${id}`));
+    if (activeNote?.id === id) setActiveNote(null);
+    setConfirmDel(null);
+  };
+
+  const onPickImage = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (!files.length || !activeNote) return;
+    setUploading(true);
+    try {
+      const newImages = [...(activeNote.images || [])];
+      for (const f of files) {
+        const imgId = uid();
+        const storagePath = `users/${user.uid}/images/${imgId}.jpg`;
+        const r = sref(storage, storagePath);
+        await uploadBytes(r, f, { contentType: f.type || "image/jpeg" });
+        const url = await getDownloadURL(r);
+        newImages.push({ id: imgId, storagePath, url, strokes: [] });
+      }
+      await updateNoteNow({ images: newImages });
+    } catch (err) {
+      alert("上傳失敗：" + err.message);
+    } finally { setUploading(false); }
+  };
+
+  const saveAnnotation = async ({ strokes }) => {
+    const imgs = activeNote.images.map((im, i) => i === annotating.imgIndex ? { ...im, strokes } : im);
+    await updateNoteNow({ images: imgs });
+    setAnnotating(null);
+  };
+
+  const delImage = async (i) => {
+    const im = activeNote.images[i];
+    if (im?.storagePath) { try { await deleteObject(sref(storage, im.storagePath)); } catch {} }
+    await updateNoteNow({ images: activeNote.images.filter((_, idx) => idx !== i) });
+    setConfirmDel(null);
+  };
+
+  if (!authReady) return h('div', { style: { ...S.app, alignItems: 'center', justifyContent: 'center' } }, '載入中…');
+  if (!user) return h(Login);
+
+  const filtered = notes.filter((n) => !search || (n.title || '').includes(search) || (n.body || '').includes(search));
+
+  return h('div', { style: S.app },
+    h('aside', { style: S.sidebar },
+      h('div', { style: S.brand }, '📷 照片筆記'),
+      creatingProj
+        ? h(NewProjectInput, { onConfirm: createProject, onCancel: () => setCreatingProj(false) })
+        : h('button', { onClick: () => setCreatingProj(true), style: S.newProjBtn }, '+ 新增專案'),
+      h('div', { style: { overflowY: "auto", flex: 1, marginTop: 4 } },
+        projects.length === 0 && !creatingProj && h('div', { style: S.empty }, '還沒有專案'),
+        ...projects.map((p) =>
+          h('div', { key: p.id,
+            onClick: () => { setActiveProject(p); setActiveNote(null); setSearch(""); },
+            style: { ...S.projItem, ...(activeProject?.id === p.id ? S.projItemActive : {}) } },
+            h('span', null, '📁'),
+            h('span', { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, p.name),
+            confirmDel?.type === "project" && confirmDel.id === p.id
+              ? h('span', { style: { display: "flex", gap: 8 } },
+                  h('span', { style: { color: '#ef4444', cursor: 'pointer' }, onClick: (e) => { e.stopPropagation(); delProject(p.id); } }, '✓'),
+                  h('span', { style: { color: '#9ca3af', cursor: 'pointer' }, onClick: (e) => { e.stopPropagation(); setConfirmDel(null); } }, '✕')
+                )
+              : h('span', { onClick: (e) => { e.stopPropagation(); setConfirmDel({ type: "project", id: p.id }); }, style: { color: "#cbd5e1", cursor: 'pointer' } }, '🗑')
+          )
+        )
+      ),
+      h('div', { style: S.userBar },
+        h('div', { style: S.userInfo },
+          user.photoURL && h('img', { src: user.photoURL, alt: '', style: S.avatar, referrerPolicy: 'no-referrer' }),
+          h('span', { style: S.userName }, user.displayName || user.email)
+        ),
+        h('button', { onClick: () => signOut(auth), style: { ...S.miniBtn, background: '#f1f5f9', color: '#64748b', width: 30, height: 30 }, title: '登出' }, '⎋')
+      )
+    ),
+
+    activeProject && h('section', { style: S.listCol },
+      h('div', { style: S.listHead },
+        h('strong', { style: { fontSize: 15 } }, activeProject.name),
+        h('button', { onClick: addNote, style: S.primaryBtnSm }, '+ 新筆記')
+      ),
+      h('div', { style: S.searchBox },
+        h('span', null, '🔍'),
+        h('input', { value: search, onChange: (e) => setSearch(e.target.value), placeholder: '搜尋筆記…', style: S.searchInput })
+      ),
+      h('div', { style: { overflowY: "auto", flex: 1 } },
+        filtered.length === 0 && h('div', { style: S.empty }, search ? '找不到符合的筆記' : '點「新筆記」開始'),
+        ...filtered.map((n) =>
+          h('div', { key: n.id, onClick: () => setActiveNote(n),
+            style: { ...S.noteItem, ...(activeNote?.id === n.id ? S.noteItemActive : {}) } },
+            h('div', { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+              h('span', { style: { fontWeight: 600, fontSize: 14, color: "#1f2937" } }, n.title || '未命名筆記'),
+              (n.images?.length > 0) && h('span', { style: S.imgBadge }, `📷 ${n.images.length}`)
+            ),
+            h('div', { style: S.notePreview }, n.body || '（無內容）'),
+            h('div', { style: S.noteDate }, fmt(n.updated))
+          )
+        )
+      )
+    ),
+
+    h('main', { style: S.editorCol },
+      !activeProject
+        ? h('div', { style: S.placeholder }, h('div', { style: { fontSize: 48 } }, '📁'), h('p', null, '選擇或新增一個專案開始記錄'))
+        : !activeNote
+        ? h('div', { style: S.placeholder }, h('div', { style: { fontSize: 48 } }, '📝'), h('p', null, '選擇左側筆記，或建立新筆記'))
+        : h('div', { style: S.editor },
+            h('div', { style: S.editorTop },
+              h('input', { value: activeNote.title || '', onChange: (e) => updateNoteFields({ title: e.target.value }), placeholder: '筆記標題', style: S.titleInput }),
+              h('div', { style: { display: "flex", gap: 8 } },
+                h('button', { onClick: () => fileRef.current.click(), disabled: uploading, style: S.ghostBtn }, uploading ? '上傳中…' : '📷 加照片'),
+                confirmDel?.type === "note" && confirmDel.id === activeNote.id
+                  ? [
+                      h('button', { key: 'ok', onClick: () => delNote(activeNote.id), style: S.dangerBtn }, '確定刪除'),
+                      h('button', { key: 'no', onClick: () => setConfirmDel(null), style: S.ghostBtn }, '✕')
+                    ]
+                  : h('button', { onClick: () => setConfirmDel({ type: "note", id: activeNote.id }), style: S.dangerBtn }, '🗑')
+              ),
+              h('input', { ref: fileRef, type: 'file', accept: 'image/*', multiple: true, capture: 'environment', onChange: onPickImage, style: { display: 'none' } })
+            ),
+            h('div', { style: S.editorDate }, '最後編輯 ' + fmt(activeNote.updated)),
+            h('textarea', {
+              value: activeNote.body || '',
+              onChange: (e) => updateNoteFields({ body: e.target.value }),
+              placeholder: '在這裡寫工作記事…　拍照或匯入照片後，點照片即可在上面畫圖、標註。',
+              style: S.bodyArea
+            }),
+            (activeNote.images?.length > 0) && h('div', { style: S.imgGrid },
+              ...activeNote.images.map((im, i) =>
+                h(ImageCard, { key: im.id, image: im, index: i,
+                  onAnnotate: () => setAnnotating({ noteId: activeNote.id, imgIndex: i }),
+                  onDelete: () => setConfirmDel({ type: "image", id: i }),
+                  confirmingDelete: confirmDel?.type === "image" && confirmDel.id === i,
+                  onConfirmDelete: () => delImage(i)
+                })
+              )
+            )
+          )
+    ),
+
+    annotating && h(PhotoAnnotator, {
+      src: activeNote.images[annotating.imgIndex].url,
+      initialStrokes: activeNote.images[annotating.imgIndex].strokes || [],
+      onSave: saveAnnotation,
+      onClose: () => setAnnotating(null)
+    })
+  );
+}
+
+createRoot(document.getElementById('root')).render(h(App));
+</script>
+</body>
+</html>
