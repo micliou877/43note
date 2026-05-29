@@ -38,8 +38,6 @@ import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signI
 import { getFirestore, collection, query, orderBy, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, serverTimestamp, writeBatch, getDocs } from "firebase/firestore";
 
 // ════════════════════════════════════════════════════════════════
-// 👇 把這六行換成你自己的 Firebase 設定
-// ════════════════════════════════════════════════════════════════
 const firebaseConfig = {
   apiKey: "AIzaSyB2EzKDDkwhWy63EyMOTEP5EVGsvhie1x0",
   authDomain: "note-66807.firebaseapp.com",
@@ -131,7 +129,7 @@ const S = {
   taskMeta: { fontSize: 11, color: '#cbd5e1', marginTop: 4 },
   editorCol: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" },
   editor: { flex: 1, display: "flex", flexDirection: "column", padding: "20px 28px", overflowY: "auto" },
-  editorTop: { display: "flex", gap: 12, alignItems: "center" },
+  editorTop: { display: "flex", gap: 12, alignItems: "center", paddingBottom: 10 },
   titleInput: { flex: 1, fontSize: 22, fontWeight: 700, border: "none", outline: "none", background: "transparent", color: "#0f172a" },
   editorDate: { fontSize: 11.5, color: "#9ca3af", marginTop: 4, marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   sizeBar: { fontSize: 11, color: '#94a3b8' },
@@ -242,9 +240,6 @@ function Login() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 通用文字輸入 Modal
-// ─────────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────
 // 通用文字輸入 Modal (升級版)
 // ─────────────────────────────────────────────────────────────
 function TextModal({ title, subtitle, placeholder, initial, confirmText, onConfirm, onCancel, multiline }) {
@@ -258,7 +253,6 @@ function TextModal({ title, subtitle, placeholder, initial, confirmText, onConfi
     try {
       await onConfirm(val.trim());
     } catch (err) {
-      // 若執行失敗則恢復按鈕狀態，錯誤提示交由上層負責
       setLoading(false);
     }
   };
@@ -667,17 +661,17 @@ function App() {
   }, [user, showTrash]);
 
   // Projects
-const createProject = async (name) => {
-  try {
-    const docRef = await addDoc(collection(db, `users/${user.uid}/projects`), { name, created: serverTimestamp(), deleted: false });
-    setCreatingProj(false);
-    setActiveProject({ id: docRef.id, name });
-    setActiveNote(null);
-  } catch (err) {
-    console.error(err);
-    alert("新增專案失敗：" + err.message + " (請檢查 Firebase 資料庫權限)");
-  }
-};
+  const createProject = async (name) => {
+    try {
+      const docRef = await addDoc(collection(db, `users/${user.uid}/projects`), { name, created: serverTimestamp(), deleted: false });
+      setCreatingProj(false);
+      setActiveProject({ id: docRef.id, name });
+      setActiveNote(null);
+    } catch (err) {
+      console.error(err);
+      alert("新增專案失敗：" + err.message + " (請檢查 Firebase 資料庫權限)");
+    }
+  };
   const renameProject = async (id, name) => {
     await updateDoc(doc(db, `users/${user.uid}/projects/${id}`), { name });
     if (activeProject?.id === id) setActiveProject({ ...activeProject, name });
@@ -702,28 +696,40 @@ const createProject = async (name) => {
   };
 
   // Notes
-const addNote = async () => {
-  try {
-    const docRef = await addDoc(collection(db, `users/${user.uid}/notes`), {
-      projectId: activeProject.id, title: "", body: "", images: [], deleted: false,
-      created: serverTimestamp(), updated: serverTimestamp(),
-    });
-    setActiveNote({ id: docRef.id, projectId: activeProject.id, title: "", body: "", images: [] });
-  } catch (err) {
-    console.error(err);
-    alert("新增筆記失敗：" + err.message + " (請檢查 Firebase 資料庫權限)");
-  }
-};
+  const addNote = async () => {
+    try {
+      const docRef = await addDoc(collection(db, `users/${user.uid}/notes`), {
+        projectId: activeProject.id, title: "", body: "", images: [], deleted: false,
+        created: serverTimestamp(), updated: serverTimestamp(),
+      });
+      setActiveNote({ id: docRef.id, projectId: activeProject.id, title: "", body: "", images: [] });
+    } catch (err) {
+      console.error(err);
+      alert("新增筆記失敗：" + err.message + " (請檢查 Firebase 資料庫權限)");
+    }
+  };
+  
+  // 已經移除自動儲存機制，改為純粹更新畫面狀態
   const updateNoteFields = (patch) => {
     lastLocalEdit.current = Date.now();
     setActiveNote(cur => ({ ...cur, ...patch }));
-    clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      if (!activeNote?.id) return;
-      updateDoc(doc(db, `users/${user.uid}/notes/${activeNote.id}`), { ...patch, updated: serverTimestamp() })
-        .catch(err => alert("儲存失敗：" + err.message));
-    }, 500);
   };
+
+  // 手動儲存筆記函式
+  const manualSaveNote = async () => {
+    if (!activeNote?.id) return;
+    try {
+      await updateDoc(doc(db, `users/${user.uid}/notes/${activeNote.id}`), {
+        title: activeNote.title,
+        body: activeNote.body,
+        updated: serverTimestamp()
+      });
+      alert('💾 筆記儲存成功！');
+    } catch (err) {
+      alert('儲存失敗：' + err.message);
+    }
+  };
+
   const updateNoteNow = async (patch) => {
     lastLocalEdit.current = Date.now();
     setActiveNote(cur => ({ ...cur, ...patch }));
@@ -778,18 +784,23 @@ const addNote = async () => {
   };
 
   // Tasks
-// Tasks
   const addTask = async (title) => {
     try {
-      await addDoc(collection(db, `users/${user.uid}/tasks`), {
+      const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("連線逾時")), 5000));
+      const addPromise = addDoc(collection(db, `users/${user.uid}/tasks`), {
         projectId: activeProject.id, title, done: false, deleted: false,
         created: serverTimestamp(),
       });
+      await Promise.race([addPromise, timeout]);
       setNewTaskModal(false);
     } catch (err) {
       console.error(err);
-      alert("新增任務失敗：" + err.message + " (請檢查 Firebase 資料庫權限)");
-      throw err; // 拋出錯誤讓 TextModal 取消載入狀態
+      if (err.message === "連線逾時") {
+        alert("新增失敗：連線逾時！\n\n👉 請檢查您是否已在 Firebase 控制台點擊「建立資料庫 (Create Database)」，或確認安全規則已發布。");
+      } else {
+        alert("新增任務失敗：" + err.message);
+      }
+      throw err;
     }
   };
   const completeTask = async (reason) => {
@@ -982,6 +993,7 @@ const addNote = async () => {
             h('div', { style: S.editorTop },
               h('input', { value: activeNote.title || '', onChange: (e) => updateNoteFields({ title: e.target.value }), placeholder: '筆記標題', style: S.titleInput }),
               h('div', { style: { display: "flex", gap: 8 } },
+                h('button', { onClick: manualSaveNote, style: { ...S.primaryBtnSm, background: '#3b82f6' } }, '💾 儲存'),
                 h('button', { onClick: () => fileRef.current.click(), disabled: uploading, style: S.ghostBtn }, uploading ? '處理中…' : '📷 加照片'),
                 confirmDel?.type === "note" && confirmDel.id === activeNote.id
                   ? h('span', { style: { display: 'flex', gap: 8 } },
