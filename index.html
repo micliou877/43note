@@ -645,12 +645,17 @@ function App() {
   }, [user, showTrash]);
 
   // Projects
-  const createProject = async (name) => {
+const createProject = async (name) => {
+  try {
     const docRef = await addDoc(collection(db, `users/${user.uid}/projects`), { name, created: serverTimestamp(), deleted: false });
     setCreatingProj(false);
     setActiveProject({ id: docRef.id, name });
     setActiveNote(null);
-  };
+  } catch (err) {
+    console.error(err);
+    alert("新增專案失敗：" + err.message + " (請檢查 Firebase 資料庫權限)");
+  }
+};
   const renameProject = async (id, name) => {
     await updateDoc(doc(db, `users/${user.uid}/projects/${id}`), { name });
     if (activeProject?.id === id) setActiveProject({ ...activeProject, name });
@@ -675,13 +680,18 @@ function App() {
   };
 
   // Notes
-  const addNote = async () => {
+const addNote = async () => {
+  try {
     const docRef = await addDoc(collection(db, `users/${user.uid}/notes`), {
       projectId: activeProject.id, title: "", body: "", images: [], deleted: false,
       created: serverTimestamp(), updated: serverTimestamp(),
     });
     setActiveNote({ id: docRef.id, projectId: activeProject.id, title: "", body: "", images: [] });
-  };
+  } catch (err) {
+    console.error(err);
+    alert("新增筆記失敗：" + err.message + " (請檢查 Firebase 資料庫權限)");
+  }
+};
   const updateNoteFields = (patch) => {
     lastLocalEdit.current = Date.now();
     setActiveNote(cur => ({ ...cur, ...patch }));
@@ -746,13 +756,18 @@ function App() {
   };
 
   // Tasks
-  const addTask = async (title) => {
+const addTask = async (title) => {
+  try {
     await addDoc(collection(db, `users/${user.uid}/tasks`), {
       projectId: activeProject.id, title, done: false, deleted: false,
       created: serverTimestamp(),
     });
     setNewTaskModal(false);
-  };
+  } catch (err) {
+    console.error(err);
+    alert("新增任務失敗：" + err.message + " (請檢查 Firebase 資料庫權限)");
+  }
+};
   const completeTask = async (reason) => {
     await updateDoc(doc(db, `users/${user.uid}/tasks/${completeTaskId}`), {
       done: true, doneReason: reason, doneAt: serverTimestamp()
