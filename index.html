@@ -14,7 +14,7 @@
   textarea::-webkit-scrollbar { width: 8px; }
   textarea::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
 
-  /* 👇 新增的手機版 RWD 樣式機制 */
+  /* 👇 手機版 RWD 樣式機制（解決螢幕擠壓問題） */
   .mobile-only { display: none !important; }
   @media (max-width: 768px) {
     .hide-on-mobile { display: none !important; }
@@ -112,7 +112,7 @@ function estimateNoteSize(note) {
 
 const S = {
   app: { display: "flex", height: "100vh", background: "#f8fafc", color: "#1f2937", fontSize: 14 },
-  sidebar: { width: 230, background: "#fff", borderRight: "1px solid #e5e7eb", display: "flex", flexDirection: "column", padding: 14 },
+  sidebar: { width: 230, flexShrink: 0, background: "#fff", borderRight: "1px solid #e5e7eb", display: "flex", flexDirection: "column", padding: 14 },
   brand: { display: "flex", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 16, marginBottom: 16, color: "#0f172a" },
   newProjBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px", background: "#0d9488", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: 13 },
   newProjForm: { display: "flex", gap: 4, alignItems: "center" },
@@ -122,7 +122,7 @@ const S = {
   projItemActive: { background: "#f0fdfa" },
   trashBtn: { display: 'flex', alignItems: 'center', gap: 6, padding: '8px 10px', background: 'transparent', color: '#64748b', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, marginTop: 8 },
   trashBtnActive: { background: '#fef2f2', color: '#dc2626' },
-  listCol: { width: 290, background: "#fff", borderRight: "1px solid #e5e7eb", display: "flex", flexDirection: "column" },
+  listCol: { width: 290, flexShrink: 0, background: "#fff", borderRight: "1px solid #e5e7eb", display: "flex", flexDirection: "column" },
   listHead: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", borderBottom: "1px solid #f1f5f9" },
   tabBar: { display: 'flex', borderBottom: '1px solid #f1f5f9' },
   tab: { flex: 1, padding: '10px', textAlign: 'center', cursor: 'pointer', fontSize: 13, color: '#64748b', borderBottom: '2px solid transparent' },
@@ -143,7 +143,6 @@ const S = {
   taskMeta: { fontSize: 11, color: '#cbd5e1', marginTop: 4 },
   editorCol: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: "#f8fafc" },
   editor: { flex: 1, display: "flex", flexDirection: "column", padding: "20px 28px", overflowY: "auto" },
-  editorTop: { display: "flex", gap: 12, alignItems: "center", paddingBottom: 10 },
   titleInput: { flex: 1, fontSize: 22, fontWeight: 700, border: "none", outline: "none", background: "transparent", color: "#0f172a" },
   editorDate: { fontSize: 11.5, color: "#9ca3af", marginTop: 4, marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   sizeBar: { fontSize: 11, color: '#94a3b8' },
@@ -604,10 +603,9 @@ function App() {
   const [permDelConfirm, setPermDelConfirm] = useState(null);
   const [dbError, setDbError] = useState("");
   
-  // 👇 新增的手機版「當前顯示畫面」狀態
+  // 👇 這是控制手機版顯示哪一個欄位的狀態
   const [mobileView, setMobileView] = useState('sidebar'); // 'sidebar' | 'list' | 'editor'
 
-  const fileRef = useRef(null);
   const lastLocalEdit = useRef(0);
 
   const getSafeTime = (val) => {
@@ -643,7 +641,6 @@ function App() {
         if (fresh) setActiveNote(fresh);
       }
     }, (err) => {
-      console.error("筆記讀取失敗:", err);
       setDbError("筆記讀取被阻擋：" + err.message);
     });
   }, [user, activeProject]);
@@ -656,7 +653,6 @@ function App() {
       try { list.sort((a, b) => getSafeTime(b.created) - getSafeTime(a.created)); } catch (err) { }
       setTasks(list);
     }, (err) => {
-      console.error("任務讀取失敗:", err);
       setDbError("任務讀取被阻擋：" + err.message);
     });
   }, [user, activeProject]);
@@ -679,7 +675,7 @@ function App() {
       setCreatingProj(false);
       setActiveProject({ id: docRef.id, name });
       setActiveNote(null);
-      setMobileView('list'); // 建立完自動切換到清單
+      setMobileView('list'); // 建立完自動切換到列表
     } catch (err) { alert("新增專案失敗：" + err.message); }
   };
   const renameProject = async (id, name) => {
@@ -714,7 +710,7 @@ function App() {
       };
       const docRef = await addDoc(collection(db, `users/${user.uid}/notes`), newNote);
       setActiveNote({ id: docRef.id, ...newNote });
-      setMobileView('editor'); // 新增後自動切到編輯畫面
+      setMobileView('editor'); // 新增筆記後，手機自動切到編輯畫面
     } catch (err) { alert("新增筆記失敗：" + err.message); }
   };
   
@@ -727,8 +723,8 @@ function App() {
     if (!activeNote?.id) return;
     try {
       await updateDoc(doc(db, `users/${user.uid}/notes/${activeNote.id}`), {
-        title: activeNote.title,
-        body: activeNote.body,
+        title: activeNote.title || '',
+        body: activeNote.body || '',
         updated: serverTimestamp()
       });
       alert('💾 筆記儲存成功！');
@@ -741,7 +737,7 @@ function App() {
     try {
       await updateDoc(doc(db, `users/${user.uid}/notes/${activeNote.id}`), { ...patch, updated: serverTimestamp() });
     } catch (err) {
-      if (err.message.includes('exceeds')) alert("筆記太大了（超過 1MB）。請刪除幾張照片或新建一個筆記。");
+      if (err.message.includes('exceeds')) alert("筆記太大了（超過 1MB）。請刪除幾張照片。");
       else alert("儲存失敗：" + err.message);
       throw err;
     }
@@ -799,7 +795,7 @@ function App() {
       await Promise.race([addPromise, timeout]);
       setNewTaskModal(false);
     } catch (err) {
-      if (err.message === "連線逾時") alert("新增失敗：連線逾時！\n\n👉 請檢查 Firebase 資料庫連線狀態。");
+      if (err.message === "連線逾時") alert("新增失敗：連線逾時！\n\n👉 請檢查 Firebase 連線狀態。");
       else alert("新增任務失敗：" + err.message);
       throw err;
     }
@@ -842,7 +838,7 @@ function App() {
     sizePct = Math.min(100, Math.round(noteSize / 10000));
   }
 
-  // 👇 套用 RWD 顯示控制 className
+  // 渲染專案列表 (Sidebar)
   const sidebar = h('aside', { className: mobileView === 'sidebar' ? 'mobile-full-width' : 'hide-on-mobile', style: S.sidebar },
     h('div', { style: S.brand }, '📷 照片筆記'),
     !showTrash && (creatingProj
@@ -879,6 +875,7 @@ function App() {
       h('button', { onClick: () => signOut(auth), style: { ...S.miniBtn, background: '#f1f5f9', color: '#64748b', width: 30, height: 30 }, title: '登出' }, '⎋'))
   );
 
+  // 垃圾桶視圖
   if (showTrash) {
     const trashEmpty = deletedProjects.length === 0 && allDeletedNotes.length === 0 && allDeletedTasks.length === 0;
     return h('div', { style: S.app },
@@ -939,11 +936,10 @@ function App() {
   return h('div', { style: S.app },
     sidebar,
 
-    // 👇 套用 RWD 顯示控制 className
+    // 渲染清單 (List Column)
     activeProject && h('section', { className: mobileView === 'list' ? 'mobile-full-width' : 'hide-on-mobile', style: S.listCol },
       h('div', { style: S.listHead },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
-          // 👇 手機版返回按鈕
           h('button', { className: 'mobile-only', onClick: () => setMobileView('sidebar'), style: { background: 'none', border: 'none', fontSize: 24, padding: '0 4px', cursor: 'pointer', color: '#64748b' } }, '‹'),
           h('strong', { style: { fontSize: 15 } }, activeProject.name)
         ),
@@ -999,7 +995,7 @@ function App() {
       )
     ),
 
-    // 👇 套用 RWD 顯示控制 className
+    // 渲染筆記編輯器 (Editor Column)
     h('main', { className: mobileView === 'editor' ? 'mobile-full-width' : 'hide-on-mobile', style: S.editorCol },
       !activeProject
         ? h('div', { style: { ...S.placeholder, position: 'relative' } }, 
@@ -1009,21 +1005,23 @@ function App() {
         ? h('div', { style: { ...S.placeholder, position: 'relative' } },
             h('button', { className: 'mobile-only', onClick: () => setMobileView('list'), style: { position: 'absolute', top: 20, left: 20, background: 'none', border: 'none', fontSize: 32, padding: '0 10px', cursor: 'pointer', color: '#64748b' } }, '‹'),
             h('div', { style: { fontSize: 48 } }, '✓'),
-            h('p', null, '從左側選任務的勾選框完成它'),
-            h('p', { style: { fontSize: 12, color: '#cbd5e1', marginTop: -8 } }, '勾選後會問你完成的理由'))
+            h('p', null, '從左側點開筆記才能加照片喔！'),
+            h('p', { style: { fontSize: 12, color: '#cbd5e1', marginTop: -8 } }, '任務是代辦事項，不提供照片功能'))
         : !activeNote
         ? h('div', { style: { ...S.placeholder, position: 'relative' } },
             h('button', { className: 'mobile-only', onClick: () => setMobileView('list'), style: { position: 'absolute', top: 20, left: 20, background: 'none', border: 'none', fontSize: 32, padding: '0 10px', cursor: 'pointer', color: '#64748b' } }, '‹'),
             h('div', { style: { fontSize: 48 } }, '📝'), h('p', null, '選擇左側筆記，或建立新筆記'))
         : h('div', { style: S.editor },
-h('div', { style: S.editorTop },
-              // 👇 手機版返回按鈕
-              h('button', { className: 'mobile-only', onClick: () => setMobileView('list'), style: { background: 'none', border: 'none', fontSize: 28, padding: '0 8px 0 0', cursor: 'pointer', color: '#64748b' } }, '‹'),
-              h('input', { value: activeNote.title || '', onChange: (e) => updateNoteFields({ title: e.target.value }), placeholder: '筆記標題', style: S.titleInput }),
-              h('div', { style: { display: "flex", gap: 8 } },
+            // 👇 這是優化防擠壓，且使用原生 Label 的工具列
+            h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12, paddingBottom: 16, marginBottom: 12, borderBottom: '1px solid #f1f5f9' } },
+              h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, width: '100%' } },
+                h('button', { className: 'mobile-only', onClick: () => setMobileView('list'), style: { background: 'none', border: 'none', fontSize: 28, padding: '0 8px 0 0', cursor: 'pointer', color: '#64748b' } }, '‹'),
+                h('input', { value: activeNote.title || '', onChange: (e) => updateNoteFields({ title: e.target.value }), placeholder: '筆記標題', style: { ...S.titleInput, width: '100%', minWidth: 0 } })
+              ),
+              h('div', { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
                 h('button', { onClick: manualSaveNote, style: { ...S.primaryBtnSm, background: '#3b82f6' } }, '💾 儲存'),
                 
-                // 👇 [修改這裡] 改用 <label> 原生標籤來觸發，並移除 capture，確保手機 100% 能打開相簿與相機選單
+                // 👇 使用 HTML 原生 <label> 解決手機瀏覽器阻擋相簿的問題
                 h('label', { style: { ...S.ghostBtn, opacity: uploading ? 0.5 : 1, pointerEvents: uploading ? 'none' : 'auto', margin: 0 } },
                   uploading ? '處理中…' : '📷 加照片',
                   h('input', { type: 'file', accept: 'image/*', multiple: true, onChange: onPickImage, style: { display: 'none' } })
@@ -1035,9 +1033,6 @@ h('div', { style: S.editorTop },
                       h('button', { onClick: () => setConfirmDel(null), style: S.ghostBtn }, '✕'))
                   : h('button', { onClick: () => setConfirmDel({ type: "note", id: activeNote.id }), style: S.dangerBtn }, '🗑')
               )
-              // 💡 註：原本放在最外面的 h('input', { ref: fileRef ... }) 已經被移到上面了
-            ),
-              h('input', { ref: fileRef, type: 'file', accept: 'image/*', multiple: true, capture: 'environment', onChange: onPickImage, style: { display: 'none' } })
             ),
             h('div', { style: S.editorDate },
               h('span', null, '最後編輯 ' + fmt(activeNote.updated)),
