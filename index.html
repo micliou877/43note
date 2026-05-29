@@ -244,21 +244,43 @@ function Login() {
 // ─────────────────────────────────────────────────────────────
 // 通用文字輸入 Modal
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// 通用文字輸入 Modal (升級版)
+// ─────────────────────────────────────────────────────────────
 function TextModal({ title, subtitle, placeholder, initial, confirmText, onConfirm, onCancel, multiline }) {
   const [val, setVal] = useState(initial || '');
-  const submit = () => { if (val.trim()) onConfirm(val.trim()); };
+  const [loading, setLoading] = useState(false);
+  const [isComposing, setIsComposing] = useState(false);
+
+  const submit = async () => {
+    if (!val.trim() || loading) return;
+    setLoading(true);
+    try {
+      await onConfirm(val.trim());
+    } catch (err) {
+      // 若執行失敗則恢復按鈕狀態，錯誤提示交由上層負責
+      setLoading(false);
+    }
+  };
+
   return h('div', { style: S.modalOverlay, onClick: (e) => e.target === e.currentTarget && onCancel() },
     h('div', { style: S.modalCard },
       h('h3', { style: S.modalTitle }, title),
       subtitle && h('p', { style: S.modalSub }, subtitle),
       multiline
-        ? h('textarea', { autoFocus: true, value: val, onChange: e => setVal(e.target.value), placeholder, style: { ...S.modalInput, minHeight: 80, resize: 'vertical' } })
+        ? h('textarea', { autoFocus: true, value: val, onChange: e => setVal(e.target.value), placeholder, style: { ...S.modalInput, minHeight: 80, resize: 'vertical' }, disabled: loading })
         : h('input', { autoFocus: true, value: val, onChange: e => setVal(e.target.value),
-            onKeyDown: e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancel(); },
-            placeholder, style: S.modalInput }),
+            onCompositionStart: () => setIsComposing(true),
+            onCompositionEnd: () => setIsComposing(false),
+            onKeyDown: e => { 
+              if (e.key === 'Enter' && !isComposing) submit(); 
+              if (e.key === 'Escape') onCancel(); 
+            },
+            placeholder, style: S.modalInput, disabled: loading }),
       h('div', { style: S.modalActions },
-        h('button', { onClick: onCancel, style: S.ghostBtn }, '取消'),
-        h('button', { onClick: submit, disabled: !val.trim(), style: { ...S.primaryBtn, opacity: val.trim() ? 1 : 0.5 } }, confirmText || '確定'))
+        h('button', { onClick: onCancel, disabled: loading, style: S.ghostBtn }, '取消'),
+        h('button', { onClick: submit, disabled: !val.trim() || loading, style: { ...S.primaryBtn, opacity: val.trim() ? 1 : 0.5 } }, loading ? '處理中…' : (confirmText || '確定'))
+      )
     )
   );
 }
@@ -756,18 +778,20 @@ const addNote = async () => {
   };
 
   // Tasks
-const addTask = async (title) => {
-  try {
-    await addDoc(collection(db, `users/${user.uid}/tasks`), {
-      projectId: activeProject.id, title, done: false, deleted: false,
-      created: serverTimestamp(),
-    });
-    setNewTaskModal(false);
-  } catch (err) {
-    console.error(err);
-    alert("新增任務失敗：" + err.message + " (請檢查 Firebase 資料庫權限)");
-  }
-};
+// Tasks
+  const addTask = async (title) => {
+    try {
+      await addDoc(collection(db, `users/${user.uid}/tasks`), {
+        projectId: activeProject.id, title, done: false, deleted: false,
+        created: serverTimestamp(),
+      });
+      setNewTaskModal(false);
+    } catch (err) {
+      console.error(err);
+      alert("新增任務失敗：" + err.message + " (請檢查 Firebase 資料庫權限)");
+      throw err; // 拋出錯誤讓 TextModal 取消載入狀態
+    }
+  };
   const completeTask = async (reason) => {
     await updateDoc(doc(db, `users/${user.uid}/tasks/${completeTaskId}`), {
       done: true, doneReason: reason, doneAt: serverTimestamp()
