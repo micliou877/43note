@@ -606,9 +606,21 @@ function App() {
   const [newTaskModal, setNewTaskModal] = useState(false);
   const [completeTaskId, setCompleteTaskId] = useState(null);
   const [permDelConfirm, setPermDelConfirm] = useState(null);
+  
+  // 👉 新增：專門用來捕捉 Firebase 隱形錯誤的狀態
+  const [dbError, setDbError] = useState("");
+
   const fileRef = useRef(null);
-  const saveTimer = useRef(null);
   const lastLocalEdit = useRef(0);
+
+  // 安全排序函式：確保就算遇到舊資料或異常時間格式，也不會讓畫面當機
+  const getSafeTime = (val) => {
+    if (!val) return 0;
+    if (typeof val.toMillis === 'function') return val.toMillis();
+    if (typeof val === 'number') return val;
+    if (val.seconds) return val.seconds * 1000;
+    return new Date(val).getTime() || 0;
+  };
 
   useEffect(() => {
     getRedirectResult(auth).catch(e => console.error("登入回傳:", e));
@@ -616,53 +628,57 @@ function App() {
     return unsub;
   }, []);
 
-useEffect(() => {
-    if (!user || !activeProject) { setNotes([]); return; }
-    // 移除了 orderBy，避免 Firebase 的複合索引限制
-    const q = query(
-      collection(db, `users/${user.uid}/notes`),
-      where("projectId", "==", activeProject.id)
-    );
+  useEffect(() => {
+    if (!user) { setProjects([]); return; }
+    const q = query(collection(db, `users/${user.uid}/projects`), orderBy("created", "desc"));
+    return onSnapshot(q, (snap) => setProjects(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+  }, [user]);
+
+  // 👉 重寫的筆記讀取區塊：加入了極度安全的排序與錯誤捕捉
+  useEffect(() => {
+    if (!user || !activeProject) { setNotes([]); setDbError(""); return; }
+    
+    const q = query(collection(db, `users/${user.uid}/notes`), where("projectId", "==", activeProject.id));
+    
     return onSnapshot(q, (snap) => {
+      setDbError(""); // 成功讀取就清空錯誤
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       
-      // 改在本地端用 JavaScript 處理排序 (時間新的排在上面)
-      list.sort((a, b) => {
-        const tA = a.updated?.toMillis ? a.updated.toMillis() : Date.now();
-        const tB = b.updated?.toMillis ? b.updated.toMillis() : Date.now();
-        return tB - tA;
-      });
+      try {
+        list.sort((a, b) => getSafeTime(b.updated) - getSafeTime(a.updated));
+      } catch (err) {
+        console.warn("筆記排序發生小問題，但不影響顯示", err);
+      }
       
       setNotes(list);
+      
       if (activeNote && Date.now() - lastLocalEdit.current > 1500) {
         const fresh = list.find(n => n.id === activeNote.id);
         if (fresh) setActiveNote(fresh);
       }
     }, (err) => {
-      console.error("讀取筆記失敗:", err); // 若有錯誤會顯示在 F12 控制台
+      console.error("筆記讀取失敗:", err);
+      setDbError("筆記讀取被阻擋：" + err.message); // 👉 如果被擋，會顯示在畫面上
     });
   }, [user, activeProject]);
 
-useEffect(() => {
+  // 👉 重寫的任務讀取區塊
+  useEffect(() => {
     if (!user || !activeProject) { setTasks([]); return; }
-    // 移除了 orderBy，避免 Firebase 的複合索引限制
-    const q = query(
-      collection(db, `users/${user.uid}/tasks`),
-      where("projectId", "==", activeProject.id)
-    );
+    
+    const q = query(collection(db, `users/${user.uid}/tasks`), where("projectId", "==", activeProject.id));
+    
     return onSnapshot(q, (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       
-      // 改在本地端用 JavaScript 處理排序 (時間新的排在上面)
-      list.sort((a, b) => {
-        const tA = a.created?.toMillis ? a.created.toMillis() : Date.now();
-        const tB = b.created?.toMillis ? b.created.toMillis() : Date.now();
-        return tB - tA;
-      });
+      try {
+        list.sort((a, b) => getSafeTime(b.created) - getSafeTime(a.created));
+      } catch (err) { }
       
       setTasks(list);
     }, (err) => {
-      console.error("讀取任務失敗:", err);
+      console.error("任務讀取失敗:", err);
+      setDbError("任務讀取被阻擋：" + err.message);
     });
   }, [user, activeProject]);
 
@@ -686,7 +702,7 @@ useEffect(() => {
       setActiveNote(null);
     } catch (err) {
       console.error(err);
-      alert("新增專案失敗：" + err.message + " (請檢查 Firebase 資料庫權限)");
+      alert("新增專案失敗：" + err.message);
     }
   };
   const renameProject = async (id, name) => {
@@ -715,24 +731,23 @@ useEffect(() => {
   // Notes
   const addNote = async () => {
     try {
-      const docRef = await addDoc(collection(db, `users/${user.uid}/notes`), {
+      const newNote = {
         projectId: activeProject.id, title: "", body: "", images: [], deleted: false,
         created: serverTimestamp(), updated: serverTimestamp(),
-      });
-      setActiveNote({ id: docRef.id, projectId: activeProject.id, title: "", body: "", images: [] });
+      };
+      const docRef = await addDoc(collection(db, `users/${user.uid}/notes`), newNote);
+      setActiveNote({ id: docRef.id, ...newNote });
     } catch (err) {
       console.error(err);
-      alert("新增筆記失敗：" + err.message + " (請檢查 Firebase 資料庫權限)");
+      alert("新增筆記失敗：" + err.message);
     }
   };
   
-  // 已經移除自動儲存機制，改為純粹更新畫面狀態
   const updateNoteFields = (patch) => {
     lastLocalEdit.current = Date.now();
     setActiveNote(cur => ({ ...cur, ...patch }));
   };
 
-  // 手動儲存筆記函式
   const manualSaveNote = async () => {
     if (!activeNote?.id) return;
     try {
@@ -787,7 +802,7 @@ useEffect(() => {
         return;
       }
       await updateNoteNow({ images: newImages });
-    } catch (err) { /* alert 已處理 */ }
+    } catch (err) { }
     finally { setUploading(false); }
   };
   const saveAnnotation = async ({ strokes, grayscale }) => {
@@ -813,7 +828,7 @@ useEffect(() => {
     } catch (err) {
       console.error(err);
       if (err.message === "連線逾時") {
-        alert("新增失敗：連線逾時！\n\n👉 請檢查您是否已在 Firebase 控制台點擊「建立資料庫 (Create Database)」，或確認安全規則已發布。");
+        alert("新增失敗：連線逾時！\n\n👉 請檢查 Firebase 資料庫連線狀態。");
       } else {
         alert("新增任務失敗：" + err.message);
       }
@@ -956,6 +971,10 @@ useEffect(() => {
         h('div', { onClick: () => setTab('tasks'), style: { ...S.tab, ...(tab === 'tasks' ? S.tabActive : {}) } },
           `任務 (${visibleTasks.filter(t => !t.done).length}/${visibleTasks.length})`)
       ),
+      
+      // 👉 新增的紅框錯誤顯示區：如果 Firebase 出問題，一定會顯示在這裡
+      dbError && h('div', { style: { background: '#fecaca', color: '#991b1b', padding: '10px 14px', margin: '14px 14px 0', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' } }, `⚠️ ${dbError}`),
+
       tab === 'notes' && h('div', { style: S.searchBox },
         h('span', null, '🔍'),
         h('input', { value: search, onChange: (e) => setSearch(e.target.value), placeholder: '搜尋筆記…', style: S.searchInput })
