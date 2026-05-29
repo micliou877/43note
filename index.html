@@ -25,8 +25,7 @@
     "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
     "firebase/app": "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js",
     "firebase/auth": "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js",
-    "firebase/firestore": "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js",
-    "firebase/storage": "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js"
+    "firebase/firestore": "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js"
   }
 }
 </script>
@@ -37,7 +36,6 @@ import { createRoot } from "react-dom/client";
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
 import { getFirestore, collection, query, orderBy, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, serverTimestamp, writeBatch, getDocs } from "firebase/firestore";
-import { getStorage, ref as sref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 
 // ════════════════════════════════════════════════════════════════
 // 👇 把這六行換成你自己的 Firebase 設定（看 Firebase Console → 專案設定）
@@ -52,10 +50,13 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
+// 照片壓縮設定（越小越省空間，但畫質越低）
+const MAX_IMG_WIDTH = 1000;   // 圖片最大寬度，超過會等比例縮小
+const JPG_QUALITY = 0.7;       // JPEG 壓縮品質 0.0~1.0
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const storage = getStorage(app);
 const googleProvider = new GoogleAuthProvider();
 
 const h = React.createElement;
@@ -66,6 +67,39 @@ const fmt = (ts) => {
   const d = ts.toDate ? ts.toDate() : new Date(ts);
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
+
+// 壓縮圖片 File → 縮小後的 base64 dataUrl
+function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = document.createElement('img');
+      img.onload = () => {
+        const scale = Math.min(1, MAX_IMG_WIDTH / img.width);
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', JPG_QUALITY));
+      };
+      img.onerror = () => reject(new Error('圖片解析失敗'));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error('檔案讀取失敗'));
+    reader.readAsDataURL(file);
+  });
+}
+
+// 估計筆記大小（粗估，給使用者知道剩多少空間）
+function estimateNoteSize(note) {
+  let bytes = (note.title?.length || 0) + (note.body?.length || 0);
+  for (const im of (note.images || [])) {
+    bytes += (im.dataUrl?.length || 0);
+    bytes += JSON.stringify(im.strokes || []).length;
+  }
+  return bytes;
+}
 
 const S = {
   app: { display: "flex", height: "100vh", background: "#f8fafc", color: "#1f2937", fontSize: 14 },
@@ -90,7 +124,9 @@ const S = {
   editor: { flex: 1, display: "flex", flexDirection: "column", padding: "20px 28px", overflowY: "auto" },
   editorTop: { display: "flex", gap: 12, alignItems: "center" },
   titleInput: { flex: 1, fontSize: 22, fontWeight: 700, border: "none", outline: "none", background: "transparent", color: "#0f172a" },
-  editorDate: { fontSize: 11.5, color: "#9ca3af", marginTop: 4, marginBottom: 14 },
+  editorDate: { fontSize: 11.5, color: "#9ca3af", marginTop: 4, marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  sizeBar: { fontSize: 11, color: '#94a3b8' },
+  sizeBarFull: { color: '#ef4444', fontWeight: 600 },
   bodyArea: { width: "100%", minHeight: 180, border: "1px solid #e5e7eb", borderRadius: 10, padding: 14, fontSize: 14.5, lineHeight: 1.7, resize: "vertical", outline: "none", color: "#374151" },
   imgGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14, marginTop: 18 },
   imgCard: { border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden", background: "#fff" },
@@ -116,9 +152,6 @@ const S = {
   userName: { fontSize: 12, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
 };
 
-// ─────────────────────────────────────────────────────────────
-// 登入頁
-// ─────────────────────────────────────────────────────────────
 function Login() {
   const [email, setEmail] = useState('');
   const [pwd, setPwd] = useState('');
@@ -180,9 +213,6 @@ function Login() {
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// 照片標註器
-// ─────────────────────────────────────────────────────────────
 function PhotoAnnotator({ src, initialStrokes, onSave, onClose }) {
   const canvasRef = useRef(null);
   const imgRef = useRef(null);
@@ -197,7 +227,6 @@ function PhotoAnnotator({ src, initialStrokes, onSave, onClose }) {
 
   useEffect(() => {
     const img = document.createElement("img");
-    img.crossOrigin = "anonymous";
     img.onload = () => {
       const maxW = 1400;
       const scale = Math.min(1, maxW / img.width);
@@ -378,14 +407,10 @@ function PhotoAnnotator({ src, initialStrokes, onSave, onClose }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// 縮圖
-// ─────────────────────────────────────────────────────────────
 function ImageCard({ image, index, onAnnotate, onDelete, confirmingDelete, onConfirmDelete }) {
   const canvasRef = useRef(null);
   useEffect(() => {
     const img = document.createElement('img');
-    img.crossOrigin = "anonymous";
     img.onload = () => {
       const c = canvasRef.current; if (!c) return;
       const maxW = 400; const scale = Math.min(1, maxW / img.width);
@@ -421,14 +446,14 @@ function ImageCard({ image, index, onAnnotate, onDelete, confirmingDelete, onCon
         }
       }
     };
-    img.src = image.url;
-  }, [image.url, image.strokes]);
+    img.src = image.dataUrl;
+  }, [image.dataUrl, image.strokes]);
 
   return h('div', { style: S.imgCard },
     h('canvas', { ref: canvasRef, style: S.thumb, onClick: onAnnotate }),
     h('div', { style: S.imgActions },
       h('button', { onClick: onAnnotate, style: S.imgActBtn }, '🎨 標註'),
-      h('a', { href: image.url, download: `note-${index + 1}.jpg`, target: '_blank', rel: 'noreferrer', style: S.imgActBtn }, '⬇'),
+      h('a', { href: image.dataUrl, download: `note-${index + 1}.jpg`, style: S.imgActBtn }, '⬇'),
       confirmingDelete
         ? h('button', { onClick: onConfirmDelete, style: { ...S.imgActBtn, color: "#ef4444", borderColor: "#fecaca" } }, '確定')
         : h('button', { onClick: onDelete, style: { ...S.imgActBtn, color: "#ef4444" } }, '🗑')
@@ -454,9 +479,6 @@ function NewProjectInput({ onConfirm, onCancel }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// 主應用
-// ─────────────────────────────────────────────────────────────
 function App() {
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
@@ -511,11 +533,6 @@ function App() {
   const delProject = async (id) => {
     const q = query(collection(db, `users/${user.uid}/notes`), where("projectId", "==", id));
     const snap = await getDocs(q);
-    for (const ds of snap.docs) {
-      for (const im of (ds.data().images || [])) {
-        if (im?.storagePath) { try { await deleteObject(sref(storage, im.storagePath)); } catch {} }
-      }
-    }
     const batch = writeBatch(db);
     snap.docs.forEach(d => batch.delete(d.ref));
     batch.delete(doc(db, `users/${user.uid}/projects/${id}`));
@@ -538,23 +555,27 @@ function App() {
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       if (!activeNote?.id) return;
-      updateDoc(doc(db, `users/${user.uid}/notes/${activeNote.id}`), { ...patch, updated: serverTimestamp() });
+      updateDoc(doc(db, `users/${user.uid}/notes/${activeNote.id}`), { ...patch, updated: serverTimestamp() })
+        .catch(err => alert("儲存失敗：" + err.message));
     }, 500);
   };
 
   const updateNoteNow = async (patch) => {
     lastLocalEdit.current = Date.now();
     setActiveNote(cur => ({ ...cur, ...patch }));
-    await updateDoc(doc(db, `users/${user.uid}/notes/${activeNote.id}`), { ...patch, updated: serverTimestamp() });
+    try {
+      await updateDoc(doc(db, `users/${user.uid}/notes/${activeNote.id}`), { ...patch, updated: serverTimestamp() });
+    } catch (err) {
+      if (err.message.includes('exceeds')) {
+        alert("筆記太大了（超過 1MB）。請刪除幾張照片或新建一個筆記。");
+      } else {
+        alert("儲存失敗：" + err.message);
+      }
+      throw err;
+    }
   };
 
   const delNote = async (id) => {
-    const note = notes.find(n => n.id === id);
-    if (note) {
-      for (const im of (note.images || [])) {
-        if (im?.storagePath) { try { await deleteObject(sref(storage, im.storagePath)); } catch {} }
-      }
-    }
     await deleteDoc(doc(db, `users/${user.uid}/notes/${id}`));
     if (activeNote?.id === id) setActiveNote(null);
     setConfirmDel(null);
@@ -568,17 +589,21 @@ function App() {
     try {
       const newImages = [...(activeNote.images || [])];
       for (const f of files) {
-        const imgId = uid();
-        const storagePath = `users/${user.uid}/images/${imgId}.jpg`;
-        const r = sref(storage, storagePath);
-        await uploadBytes(r, f, { contentType: f.type || "image/jpeg" });
-        const url = await getDownloadURL(r);
-        newImages.push({ id: imgId, storagePath, url, strokes: [] });
+        const dataUrl = await compressImage(f);
+        newImages.push({ id: uid(), dataUrl, strokes: [] });
+      }
+      // 預檢查大小
+      const fakeNote = { ...activeNote, images: newImages };
+      if (estimateNoteSize(fakeNote) > 950000) {
+        alert("加入這些照片後筆記會超過 1MB 上限。建議刪除舊照片或新建一個筆記再加。");
+        return;
       }
       await updateNoteNow({ images: newImages });
     } catch (err) {
-      alert("上傳失敗：" + err.message);
-    } finally { setUploading(false); }
+      // updateNoteNow 已經 alert 過了
+    } finally {
+      setUploading(false);
+    }
   };
 
   const saveAnnotation = async ({ strokes }) => {
@@ -588,8 +613,6 @@ function App() {
   };
 
   const delImage = async (i) => {
-    const im = activeNote.images[i];
-    if (im?.storagePath) { try { await deleteObject(sref(storage, im.storagePath)); } catch {} }
     await updateNoteNow({ images: activeNote.images.filter((_, idx) => idx !== i) });
     setConfirmDel(null);
   };
@@ -598,6 +621,13 @@ function App() {
   if (!user) return h(Login);
 
   const filtered = notes.filter((n) => !search || (n.title || '').includes(search) || (n.body || '').includes(search));
+
+  // 估算當前筆記大小
+  let noteSize = 0, sizePct = 0;
+  if (activeNote) {
+    noteSize = estimateNoteSize(activeNote);
+    sizePct = Math.min(100, Math.round(noteSize / 10000));
+  }
 
   return h('div', { style: S.app },
     h('aside', { style: S.sidebar },
@@ -665,7 +695,7 @@ function App() {
             h('div', { style: S.editorTop },
               h('input', { value: activeNote.title || '', onChange: (e) => updateNoteFields({ title: e.target.value }), placeholder: '筆記標題', style: S.titleInput }),
               h('div', { style: { display: "flex", gap: 8 } },
-                h('button', { onClick: () => fileRef.current.click(), disabled: uploading, style: S.ghostBtn }, uploading ? '上傳中…' : '📷 加照片'),
+                h('button', { onClick: () => fileRef.current.click(), disabled: uploading, style: S.ghostBtn }, uploading ? '處理中…' : '📷 加照片'),
                 confirmDel?.type === "note" && confirmDel.id === activeNote.id
                   ? [
                       h('button', { key: 'ok', onClick: () => delNote(activeNote.id), style: S.dangerBtn }, '確定刪除'),
@@ -675,7 +705,11 @@ function App() {
               ),
               h('input', { ref: fileRef, type: 'file', accept: 'image/*', multiple: true, capture: 'environment', onChange: onPickImage, style: { display: 'none' } })
             ),
-            h('div', { style: S.editorDate }, '最後編輯 ' + fmt(activeNote.updated)),
+            h('div', { style: S.editorDate },
+              h('span', null, '最後編輯 ' + fmt(activeNote.updated)),
+              h('span', { style: { ...S.sizeBar, ...(sizePct > 85 ? S.sizeBarFull : {}) } },
+                `${(noteSize / 1024).toFixed(0)} KB / 1 MB (${sizePct}%)`)
+            ),
             h('textarea', {
               value: activeNote.body || '',
               onChange: (e) => updateNoteFields({ body: e.target.value }),
@@ -696,7 +730,7 @@ function App() {
     ),
 
     annotating && h(PhotoAnnotator, {
-      src: activeNote.images[annotating.imgIndex].url,
+      src: activeNote.images[annotating.imgIndex].dataUrl,
       initialStrokes: activeNote.images[annotating.imgIndex].strokes || [],
       onSave: saveAnnotation,
       onClose: () => setAnnotating(null)
