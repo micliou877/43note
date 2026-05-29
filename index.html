@@ -13,6 +13,20 @@
   input, textarea, button { font-family: inherit; }
   textarea::-webkit-scrollbar { width: 8px; }
   textarea::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
+
+  /* 👇 新增的手機版 RWD 樣式機制 */
+  .mobile-only { display: none !important; }
+  @media (max-width: 768px) {
+    .hide-on-mobile { display: none !important; }
+    .mobile-full-width {
+      width: 100% !important;
+      max-width: 100% !important;
+      flex: 1 1 100% !important;
+      border-right: none !important;
+      display: flex !important;
+    }
+    .mobile-only { display: inline-flex !important; align-items: center; justify-content: center; }
+  }
 </style>
 </head>
 <body>
@@ -127,7 +141,7 @@ const S = {
   taskTitleDone: { textDecoration: 'line-through', color: '#94a3b8' },
   taskReason: { fontSize: 12, color: '#10b981', marginTop: 4 },
   taskMeta: { fontSize: 11, color: '#cbd5e1', marginTop: 4 },
-  editorCol: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" },
+  editorCol: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: "#f8fafc" },
   editor: { flex: 1, display: "flex", flexDirection: "column", padding: "20px 28px", overflowY: "auto" },
   editorTop: { display: "flex", gap: 12, alignItems: "center", paddingBottom: 10 },
   titleInput: { flex: 1, fontSize: 22, fontWeight: 700, border: "none", outline: "none", background: "transparent", color: "#0f172a" },
@@ -170,9 +184,6 @@ const S = {
   miniDanger: { fontSize: 12, color: '#ef4444', background: 'none', border: '1px solid #fecaca', padding: '4px 10px', borderRadius: 6, cursor: 'pointer' },
 };
 
-// ─────────────────────────────────────────────────────────────
-// 登入
-// ─────────────────────────────────────────────────────────────
 function Login() {
   const [email, setEmail] = useState('');
   const [pwd, setPwd] = useState('');
@@ -239,9 +250,6 @@ function Login() {
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// 通用文字輸入 Modal (升級版)
-// ─────────────────────────────────────────────────────────────
 function TextModal({ title, subtitle, placeholder, initial, confirmText, onConfirm, onCancel, multiline }) {
   const [val, setVal] = useState(initial || '');
   const [loading, setLoading] = useState(false);
@@ -279,9 +287,6 @@ function TextModal({ title, subtitle, placeholder, initial, confirmText, onConfi
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// 照片標註器
-// ─────────────────────────────────────────────────────────────
 function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose }) {
   const canvasRef = useRef(null);
   const imgRef = useRef(null);
@@ -471,9 +476,6 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// 縮圖
-// ─────────────────────────────────────────────────────────────
 function ImageCard({ image, index, onAnnotate, onDelete, confirmingDelete, onConfirmDelete }) {
   const canvasRef = useRef(null);
   useEffect(() => {
@@ -529,9 +531,6 @@ function ImageCard({ image, index, onAnnotate, onDelete, confirmingDelete, onCon
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// 專案項目（含改名）
-// ─────────────────────────────────────────────────────────────
 function ProjectItem({ project, isActive, onClick, onRename, onDelete, confirmingDelete, onConfirmDelete, onCancelDelete }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(project.name);
@@ -569,9 +568,6 @@ function ProjectItem({ project, isActive, onClick, onRename, onDelete, confirmin
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// 新增專案輸入
-// ─────────────────────────────────────────────────────────────
 function NewProjectInput({ onConfirm, onCancel }) {
   const [val, setVal] = useState("");
   return h('div', { style: S.newProjForm },
@@ -606,14 +602,14 @@ function App() {
   const [newTaskModal, setNewTaskModal] = useState(false);
   const [completeTaskId, setCompleteTaskId] = useState(null);
   const [permDelConfirm, setPermDelConfirm] = useState(null);
-  
-  // 👉 新增：專門用來捕捉 Firebase 隱形錯誤的狀態
   const [dbError, setDbError] = useState("");
+  
+  // 👇 新增的手機版「當前顯示畫面」狀態
+  const [mobileView, setMobileView] = useState('sidebar'); // 'sidebar' | 'list' | 'editor'
 
   const fileRef = useRef(null);
   const lastLocalEdit = useRef(0);
 
-  // 安全排序函式：確保就算遇到舊資料或異常時間格式，也不會讓畫面當機
   const getSafeTime = (val) => {
     if (!val) return 0;
     if (typeof val.toMillis === 'function') return val.toMillis();
@@ -634,47 +630,30 @@ function App() {
     return onSnapshot(q, (snap) => setProjects(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
   }, [user]);
 
-  // 👉 重寫的筆記讀取區塊：加入了極度安全的排序與錯誤捕捉
   useEffect(() => {
     if (!user || !activeProject) { setNotes([]); setDbError(""); return; }
-    
     const q = query(collection(db, `users/${user.uid}/notes`), where("projectId", "==", activeProject.id));
-    
     return onSnapshot(q, (snap) => {
-      setDbError(""); // 成功讀取就清空錯誤
+      setDbError(""); 
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      
-      try {
-        list.sort((a, b) => getSafeTime(b.updated) - getSafeTime(a.updated));
-      } catch (err) {
-        console.warn("筆記排序發生小問題，但不影響顯示", err);
-      }
-      
+      try { list.sort((a, b) => getSafeTime(b.updated) - getSafeTime(a.updated)); } catch (err) {}
       setNotes(list);
-      
       if (activeNote && Date.now() - lastLocalEdit.current > 1500) {
         const fresh = list.find(n => n.id === activeNote.id);
         if (fresh) setActiveNote(fresh);
       }
     }, (err) => {
       console.error("筆記讀取失敗:", err);
-      setDbError("筆記讀取被阻擋：" + err.message); // 👉 如果被擋，會顯示在畫面上
+      setDbError("筆記讀取被阻擋：" + err.message);
     });
   }, [user, activeProject]);
 
-  // 👉 重寫的任務讀取區塊
   useEffect(() => {
     if (!user || !activeProject) { setTasks([]); return; }
-    
     const q = query(collection(db, `users/${user.uid}/tasks`), where("projectId", "==", activeProject.id));
-    
     return onSnapshot(q, (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      
-      try {
-        list.sort((a, b) => getSafeTime(b.created) - getSafeTime(a.created));
-      } catch (err) { }
-      
+      try { list.sort((a, b) => getSafeTime(b.created) - getSafeTime(a.created)); } catch (err) { }
       setTasks(list);
     }, (err) => {
       console.error("任務讀取失敗:", err);
@@ -700,10 +679,8 @@ function App() {
       setCreatingProj(false);
       setActiveProject({ id: docRef.id, name });
       setActiveNote(null);
-    } catch (err) {
-      console.error(err);
-      alert("新增專案失敗：" + err.message);
-    }
+      setMobileView('list'); // 建立完自動切換到清單
+    } catch (err) { alert("新增專案失敗：" + err.message); }
   };
   const renameProject = async (id, name) => {
     await updateDoc(doc(db, `users/${user.uid}/projects/${id}`), { name });
@@ -711,7 +688,7 @@ function App() {
   };
   const trashProject = async (id) => {
     await updateDoc(doc(db, `users/${user.uid}/projects/${id}`), { deleted: true, deletedAt: serverTimestamp() });
-    if (activeProject?.id === id) { setActiveProject(null); setActiveNote(null); }
+    if (activeProject?.id === id) { setActiveProject(null); setActiveNote(null); setMobileView('sidebar'); }
     setConfirmDel(null);
   };
   const restoreProject = async (id) => {
@@ -737,10 +714,8 @@ function App() {
       };
       const docRef = await addDoc(collection(db, `users/${user.uid}/notes`), newNote);
       setActiveNote({ id: docRef.id, ...newNote });
-    } catch (err) {
-      console.error(err);
-      alert("新增筆記失敗：" + err.message);
-    }
+      setMobileView('editor'); // 新增後自動切到編輯畫面
+    } catch (err) { alert("新增筆記失敗：" + err.message); }
   };
   
   const updateNoteFields = (patch) => {
@@ -757,9 +732,7 @@ function App() {
         updated: serverTimestamp()
       });
       alert('💾 筆記儲存成功！');
-    } catch (err) {
-      alert('儲存失敗：' + err.message);
-    }
+    } catch (err) { alert('儲存失敗：' + err.message); }
   };
 
   const updateNoteNow = async (patch) => {
@@ -775,7 +748,7 @@ function App() {
   };
   const trashNote = async (id) => {
     await updateDoc(doc(db, `users/${user.uid}/notes/${id}`), { deleted: true, deletedAt: serverTimestamp() });
-    if (activeNote?.id === id) setActiveNote(null);
+    if (activeNote?.id === id) { setActiveNote(null); setMobileView('list'); }
     setConfirmDel(null);
   };
   const restoreNote = async (id) => {
@@ -826,12 +799,8 @@ function App() {
       await Promise.race([addPromise, timeout]);
       setNewTaskModal(false);
     } catch (err) {
-      console.error(err);
-      if (err.message === "連線逾時") {
-        alert("新增失敗：連線逾時！\n\n👉 請檢查 Firebase 資料庫連線狀態。");
-      } else {
-        alert("新增任務失敗：" + err.message);
-      }
+      if (err.message === "連線逾時") alert("新增失敗：連線逾時！\n\n👉 請檢查 Firebase 資料庫連線狀態。");
+      else alert("新增任務失敗：" + err.message);
       throw err;
     }
   };
@@ -873,7 +842,8 @@ function App() {
     sizePct = Math.min(100, Math.round(noteSize / 10000));
   }
 
-  const sidebar = h('aside', { style: S.sidebar },
+  // 👇 套用 RWD 顯示控制 className
+  const sidebar = h('aside', { className: mobileView === 'sidebar' ? 'mobile-full-width' : 'hide-on-mobile', style: S.sidebar },
     h('div', { style: S.brand }, '📷 照片筆記'),
     !showTrash && (creatingProj
       ? h(NewProjectInput, { onConfirm: createProject, onCancel: () => setCreatingProj(false) })
@@ -883,7 +853,7 @@ function App() {
       !showTrash && activeProjects.map((p) =>
         h(ProjectItem, {
           key: p.id, project: p, isActive: activeProject?.id === p.id,
-          onClick: () => { setActiveProject(p); setActiveNote(null); setSearch(""); setTab('notes'); },
+          onClick: () => { setActiveProject(p); setActiveNote(null); setSearch(""); setTab('notes'); setMobileView('list'); },
           onRename: (name) => renameProject(p.id, name),
           onDelete: () => setConfirmDel({ type: "project", id: p.id }),
           confirmingDelete: confirmDel?.type === "project" && confirmDel.id === p.id,
@@ -892,7 +862,14 @@ function App() {
         }))
     ),
     h('button', {
-      onClick: () => { setShowTrash(t => !t); setActiveProject(null); setActiveNote(null); },
+      onClick: () => { 
+        setShowTrash(t => { 
+          const isOpening = !t;
+          setMobileView(isOpening ? 'list' : 'sidebar'); 
+          return isOpening; 
+        }); 
+        setActiveProject(null); setActiveNote(null); 
+      },
       style: { ...S.trashBtn, ...(showTrash ? S.trashBtnActive : {}) }
     }, '🗑️ 垃圾桶'),
     h('div', { style: S.userBar },
@@ -906,8 +883,11 @@ function App() {
     const trashEmpty = deletedProjects.length === 0 && allDeletedNotes.length === 0 && allDeletedTasks.length === 0;
     return h('div', { style: S.app },
       sidebar,
-      h('main', { style: { ...S.editorCol, padding: 24, overflowY: 'auto' } },
-        h('h2', { style: { marginTop: 0 } }, '🗑️ 垃圾桶'),
+      h('main', { className: mobileView === 'list' ? 'mobile-full-width' : 'hide-on-mobile', style: { ...S.editorCol, padding: 24, overflowY: 'auto' } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 } },
+          h('button', { className: 'mobile-only', onClick: () => setMobileView('sidebar'), style: { background: 'none', border: 'none', fontSize: 24, padding: '0 8px', cursor: 'pointer', color: '#64748b' } }, '‹'),
+          h('h2', { style: { margin: 0 } }, '🗑️ 垃圾桶')
+        ),
         h('p', { style: { color: '#64748b', fontSize: 13 } }, '在這裡可以還原刪除的項目，或永久刪除釋放空間。'),
         trashEmpty && h('div', { style: { ...S.placeholder, height: 200 } }, '垃圾桶是空的'),
         deletedProjects.length > 0 && h('div', null,
@@ -959,9 +939,14 @@ function App() {
   return h('div', { style: S.app },
     sidebar,
 
-    activeProject && h('section', { style: S.listCol },
+    // 👇 套用 RWD 顯示控制 className
+    activeProject && h('section', { className: mobileView === 'list' ? 'mobile-full-width' : 'hide-on-mobile', style: S.listCol },
       h('div', { style: S.listHead },
-        h('strong', { style: { fontSize: 15 } }, activeProject.name),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+          // 👇 手機版返回按鈕
+          h('button', { className: 'mobile-only', onClick: () => setMobileView('sidebar'), style: { background: 'none', border: 'none', fontSize: 24, padding: '0 4px', cursor: 'pointer', color: '#64748b' } }, '‹'),
+          h('strong', { style: { fontSize: 15 } }, activeProject.name)
+        ),
         tab === 'notes'
           ? h('button', { onClick: addNote, style: S.primaryBtnSm }, '+ 新筆記')
           : h('button', { onClick: () => setNewTaskModal(true), style: S.primaryBtnSm }, '+ 新任務')
@@ -972,7 +957,6 @@ function App() {
           `任務 (${visibleTasks.filter(t => !t.done).length}/${visibleTasks.length})`)
       ),
       
-      // 👉 新增的紅框錯誤顯示區：如果 Firebase 出問題，一定會顯示在這裡
       dbError && h('div', { style: { background: '#fecaca', color: '#991b1b', padding: '10px 14px', margin: '14px 14px 0', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' } }, `⚠️ ${dbError}`),
 
       tab === 'notes' && h('div', { style: S.searchBox },
@@ -983,7 +967,7 @@ function App() {
         tab === 'notes' && h('div', null,
           filtered.length === 0 && h('div', { style: S.empty }, search ? '找不到符合的筆記' : '點「新筆記」開始'),
           ...filtered.map((n) =>
-            h('div', { key: n.id, onClick: () => setActiveNote(n),
+            h('div', { key: n.id, onClick: () => { setActiveNote(n); setMobileView('editor'); },
               style: { ...S.noteItem, ...(activeNote?.id === n.id ? S.noteItemActive : {}) } },
               h('div', { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
                 h('span', { style: { fontWeight: 600, fontSize: 14, color: "#1f2937" } }, n.title || '未命名筆記'),
@@ -1015,18 +999,26 @@ function App() {
       )
     ),
 
-    h('main', { style: S.editorCol },
+    // 👇 套用 RWD 顯示控制 className
+    h('main', { className: mobileView === 'editor' ? 'mobile-full-width' : 'hide-on-mobile', style: S.editorCol },
       !activeProject
-        ? h('div', { style: S.placeholder }, h('div', { style: { fontSize: 48 } }, '📁'), h('p', null, '選擇或新增一個專案開始記錄'))
+        ? h('div', { style: { ...S.placeholder, position: 'relative' } }, 
+            h('div', { style: { fontSize: 48 } }, '📁'), h('p', null, '選擇或新增一個專案開始記錄')
+          )
         : tab === 'tasks'
-        ? h('div', { style: S.placeholder },
+        ? h('div', { style: { ...S.placeholder, position: 'relative' } },
+            h('button', { className: 'mobile-only', onClick: () => setMobileView('list'), style: { position: 'absolute', top: 20, left: 20, background: 'none', border: 'none', fontSize: 32, padding: '0 10px', cursor: 'pointer', color: '#64748b' } }, '‹'),
             h('div', { style: { fontSize: 48 } }, '✓'),
             h('p', null, '從左側選任務的勾選框完成它'),
             h('p', { style: { fontSize: 12, color: '#cbd5e1', marginTop: -8 } }, '勾選後會問你完成的理由'))
         : !activeNote
-        ? h('div', { style: S.placeholder }, h('div', { style: { fontSize: 48 } }, '📝'), h('p', null, '選擇左側筆記，或建立新筆記'))
+        ? h('div', { style: { ...S.placeholder, position: 'relative' } },
+            h('button', { className: 'mobile-only', onClick: () => setMobileView('list'), style: { position: 'absolute', top: 20, left: 20, background: 'none', border: 'none', fontSize: 32, padding: '0 10px', cursor: 'pointer', color: '#64748b' } }, '‹'),
+            h('div', { style: { fontSize: 48 } }, '📝'), h('p', null, '選擇左側筆記，或建立新筆記'))
         : h('div', { style: S.editor },
             h('div', { style: S.editorTop },
+              // 👇 手機版返回按鈕
+              h('button', { className: 'mobile-only', onClick: () => setMobileView('list'), style: { background: 'none', border: 'none', fontSize: 28, padding: '0 8px 0 0', cursor: 'pointer', color: '#64748b' } }, '‹'),
               h('input', { value: activeNote.title || '', onChange: (e) => updateNoteFields({ title: e.target.value }), placeholder: '筆記標題', style: S.titleInput }),
               h('div', { style: { display: "flex", gap: 8 } },
                 h('button', { onClick: manualSaveNote, style: { ...S.primaryBtnSm, background: '#3b82f6' } }, '💾 儲存'),
