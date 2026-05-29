@@ -34,7 +34,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { createRoot } from "react-dom/client";
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
 import { getFirestore, collection, query, orderBy, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, serverTimestamp, writeBatch, getDocs } from "firebase/firestore";
 
 // ════════════════════════════════════════════════════════════════
@@ -161,9 +161,15 @@ function Login() {
 
   const google = async () => {
     setErr(''); setLoading(true);
-    try { await signInWithPopup(auth, googleProvider); }
-    catch (e) { setErr(e.message); }
-    finally { setLoading(false); }
+    try {
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      if (isMobile) {
+        await signInWithRedirect(auth, googleProvider);
+      } else {
+        await signInWithPopup(auth, googleProvider);
+      }
+    }
+    catch (e) { setErr(e.message); setLoading(false); }
   };
 
   const emailLogin = async (e) => {
@@ -496,6 +502,7 @@ function App() {
   const lastLocalEdit = useRef(0);
 
   useEffect(() => {
+    getRedirectResult(auth).catch(e => console.error("登入回傳錯誤:", e));
     const unsub = onAuthStateChanged(auth, (u) => { setUser(u); setAuthReady(true); });
     return unsub;
   }, []);
