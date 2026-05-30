@@ -501,7 +501,65 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
   );
 }
 
-function ImageCard({ image, index, onAnnotate, onDelete, confirmingDelete, onConfirmDelete, onRotateLeft, onRotateRight }) {
+function Lightbox({ image, onClose }) {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  useEffect(() => {
+    const img = document.createElement('img');
+    img.onload = () => {
+      const c = canvasRef.current; if (!c) return;
+      const maxW = window.innerWidth * 0.92;
+      const maxH = window.innerHeight * 0.86;
+      const scale = Math.min(1, maxW / img.width, maxH / img.height);
+      c.width = Math.round(img.width * scale);
+      c.height = Math.round(img.height * scale);
+      const ctx = c.getContext('2d');
+      if (image.grayscale) ctx.filter = 'grayscale(100%)';
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      ctx.filter = 'none';
+      const annotatorScale = Math.min(1, 1400 / img.width);
+      const ratio = c.width / (img.width * annotatorScale);
+      for (const s of (image.strokes || [])) {
+        if (!s || !s.color) continue;
+        ctx.strokeStyle = s.color; ctx.fillStyle = s.color;
+        ctx.lineWidth = s.width * ratio; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        if (s.type === 'pen') {
+          ctx.beginPath();
+          s.points.forEach((p, i) => (i ? ctx.lineTo(p.x * ratio, p.y * ratio) : ctx.moveTo(p.x * ratio, p.y * ratio)));
+          ctx.stroke();
+        } else if (s.type === 'rect') {
+          ctx.strokeRect(s.x0 * ratio, s.y0 * ratio, (s.x1 - s.x0) * ratio, (s.y1 - s.y0) * ratio);
+        } else if (s.type === 'arrow') {
+          const x0 = s.x0 * ratio, y0 = s.y0 * ratio, x1 = s.x1 * ratio, y1 = s.y1 * ratio;
+          const head = (10 + s.width * 2) * ratio;
+          const ang = Math.atan2(y1 - y0, x1 - x0);
+          ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(x1, y1);
+          ctx.lineTo(x1 - head * Math.cos(ang - Math.PI / 6), y1 - head * Math.sin(ang - Math.PI / 6));
+          ctx.lineTo(x1 - head * Math.cos(ang + Math.PI / 6), y1 - head * Math.sin(ang + Math.PI / 6));
+          ctx.closePath(); ctx.fill();
+        } else if (s.type === 'text') {
+          ctx.font = `${s.size * ratio}px -apple-system, "PingFang TC", sans-serif`;
+          ctx.textBaseline = 'top';
+          ctx.fillText(s.text, s.x * ratio, s.y * ratio);
+        }
+      }
+    };
+    img.src = image.dataUrl;
+  }, [image]);
+  return h('div', { style: { ...S.modalOverlay, cursor: 'zoom-out' }, onClick: (e) => e.target === e.currentTarget && onClose() },
+    h('div', { style: { position: 'relative' } },
+      h('button', { onClick: onClose, style: { position: 'absolute', top: -44, right: 0, background: 'rgba(255,255,255,.2)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 14 } }, '✕ 關閉'),
+      h('canvas', { ref: canvasRef, style: { display: 'block', borderRadius: 10, maxWidth: '92vw', maxHeight: '86vh' } })
+    )
+  );
+}
+
+function ImageCard({ image, index, onAnnotate, onDelete, confirmingDelete, onConfirmDelete, onRotateLeft, onRotateRight, onView }) {
   const canvasRef = useRef(null);
   useEffect(() => {
     const img = document.createElement('img');
@@ -545,7 +603,7 @@ function ImageCard({ image, index, onAnnotate, onDelete, confirmingDelete, onCon
   }, [image.dataUrl, image.strokes, image.grayscale]);
 
   return h('div', { style: S.imgCard },
-    h('canvas', { ref: canvasRef, style: S.thumb, onClick: onAnnotate }),
+    h('canvas', { ref: canvasRef, style: { ...S.thumb, cursor: 'zoom-in' }, onClick: onView }),
     h('div', { style: S.imgActions },
       h('button', { onClick: onAnnotate, style: S.imgActBtn }, '🎨 標註'),
       h('button', { onClick: onRotateLeft, title: '向左旋轉', style: S.imgActBtn }, '↺'),
@@ -630,7 +688,9 @@ function App() {
   const [completeTaskId, setCompleteTaskId] = useState(null);
   const [permDelConfirm, setPermDelConfirm] = useState(null);
   const [dbError, setDbError] = useState("");
-  
+  const [lightbox, setLightbox] = useState(null);
+  const [bodyExpanded, setBodyExpanded] = useState(false);
+
   // 👇 這是控制手機版顯示哪一個欄位的狀態
   const [mobileView, setMobileView] = useState('sidebar'); // 'sidebar' | 'list' | 'editor'
 
@@ -803,8 +863,14 @@ function App() {
     finally { setUploading(false); }
   };
   const saveAnnotation = async ({ strokes, grayscale }) => {
-    const imgs = activeNote.images.map((im, i) => i === annotating.imgIndex ? { ...im, strokes, grayscale } : im);
-    await updateNoteNow({ images: imgs });
+    if (annotating.type === 'task') {
+      const task = tasks.find(t => t.id === annotating.id);
+      const imgs = task.images.map((im, i) => i === annotating.imgIndex ? { ...im, strokes, grayscale } : im);
+      await updateDoc(doc(db, `users/${user.uid}/tasks/${annotating.id}`), { images: imgs });
+    } else {
+      const imgs = activeNote.images.map((im, i) => i === annotating.imgIndex ? { ...im, strokes, grayscale } : im);
+      await updateNoteNow({ images: imgs });
+    }
     setAnnotating(null);
   };
   const delImage = async (i) => {
@@ -822,12 +888,42 @@ function App() {
     } catch (err) { alert('旋轉失敗：' + err.message); }
   };
 
+  const onPickTaskImage = async (taskId, e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (!files.length) return;
+    try {
+      const task = tasks.find(t => t.id === taskId);
+      const newImages = [...(task?.images || [])];
+      for (const f of files) {
+        const dataUrl = await compressImage(f);
+        newImages.push({ id: uid(), dataUrl, strokes: [], grayscale: false });
+      }
+      await updateDoc(doc(db, `users/${user.uid}/tasks/${taskId}`), { images: newImages });
+    } catch (err) { alert('加入照片失敗：' + err.message); }
+  };
+  const delTaskImage = async (taskId, imgIndex) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+    await updateDoc(doc(db, `users/${user.uid}/tasks/${taskId}`), { images: task.images.filter((_, i) => i !== imgIndex) });
+    setConfirmDel(null);
+  };
+  const rotateTaskImage = async (taskId, imgIndex, deg) => {
+    try {
+      const task = tasks.find(t => t.id === taskId);
+      if (!task) return;
+      const newDataUrl = await rotateImageData(task.images[imgIndex].dataUrl, deg);
+      const newImages = task.images.map((im, i) => i === imgIndex ? { ...im, dataUrl: newDataUrl, strokes: [] } : im);
+      await updateDoc(doc(db, `users/${user.uid}/tasks/${taskId}`), { images: newImages });
+    } catch (err) { alert('旋轉失敗：' + err.message); }
+  };
+
   // Tasks
   const addTask = async (title) => {
     try {
       const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("連線逾時")), 5000));
       const addPromise = addDoc(collection(db, `users/${user.uid}/tasks`), {
-        projectId: activeProject.id, title, done: false, deleted: false,
+        projectId: activeProject.id, title, done: false, deleted: false, images: [],
         created: serverTimestamp(),
       });
       await Promise.race([addPromise, timeout]);
@@ -1019,15 +1115,36 @@ function App() {
                 style: { ...S.taskCheck, ...(t.done ? S.taskCheckDone : {}) }
               }, t.done ? '✓' : ''),
               h('div', { style: { flex: 1 } },
-                h('div', { style: { ...S.taskTitle, ...(t.done ? S.taskTitleDone : {}) } }, t.title),
-                t.done && t.doneReason && h('div', { style: S.taskReason }, `✓ ${t.doneReason}`),
-                h('div', { style: S.taskMeta },
-                  t.done ? `完成於 ${fmt(t.doneAt)}` : `建立於 ${fmt(t.created)}`)),
-              confirmDel?.type === 'task' && confirmDel.id === t.id
-                ? h('span', { style: { display: "flex", gap: 4 } },
-                    h('span', { style: { color: '#ef4444', cursor: 'pointer' }, onClick: () => trashTask(t.id) }, '✓'),
-                    h('span', { style: { color: '#9ca3af', cursor: 'pointer' }, onClick: () => setConfirmDel(null) }, '✕'))
-                : h('span', { style: { color: '#cbd5e1', cursor: 'pointer', alignSelf: 'flex-start' }, onClick: () => setConfirmDel({ type: 'task', id: t.id }) }, '🗑')
+                h('div', { style: { display: 'flex', alignItems: 'flex-start', gap: 6 } },
+                  h('div', { style: { flex: 1 } },
+                    h('div', { style: { ...S.taskTitle, ...(t.done ? S.taskTitleDone : {}) } }, t.title),
+                    t.done && t.doneReason && h('div', { style: S.taskReason }, `✓ ${t.doneReason}`),
+                    h('div', { style: S.taskMeta }, t.done ? `完成於 ${fmt(t.doneAt)}` : `建立於 ${fmt(t.created)}`)
+                  ),
+                  h('label', { style: { ...S.imgActBtn, cursor: 'pointer', flexShrink: 0, margin: 0 }, title: '加照片' },
+                    '📷',
+                    h('input', { type: 'file', accept: 'image/*', multiple: true, onChange: (e) => onPickTaskImage(t.id, e), style: { display: 'none' } })
+                  ),
+                  confirmDel?.type === 'task' && confirmDel.id === t.id
+                    ? h('span', { style: { display: 'flex', gap: 4, flexShrink: 0 } },
+                        h('span', { style: { color: '#ef4444', cursor: 'pointer' }, onClick: () => trashTask(t.id) }, '✓'),
+                        h('span', { style: { color: '#9ca3af', cursor: 'pointer' }, onClick: () => setConfirmDel(null) }, '✕'))
+                    : h('span', { style: { color: '#cbd5e1', cursor: 'pointer', flexShrink: 0 }, onClick: () => setConfirmDel({ type: 'task', id: t.id }) }, '🗑')
+                ),
+                (t.images?.length > 0) && h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8, marginTop: 10 } },
+                  ...t.images.map((im, i) =>
+                    h(ImageCard, { key: im.id, image: im, index: i,
+                      onView: () => setLightbox(im),
+                      onAnnotate: () => setAnnotating({ type: 'task', id: t.id, imgIndex: i }),
+                      onDelete: () => setConfirmDel({ type: 'taskImage', taskId: t.id, id: i }),
+                      confirmingDelete: confirmDel?.type === 'taskImage' && confirmDel.taskId === t.id && confirmDel.id === i,
+                      onConfirmDelete: () => delTaskImage(t.id, i),
+                      onRotateLeft: () => rotateTaskImage(t.id, i, 270),
+                      onRotateRight: () => rotateTaskImage(t.id, i, 90),
+                    })
+                  )
+                )
+              )
             ))
         )
       )
@@ -1077,14 +1194,22 @@ function App() {
               h('span', { style: { ...S.sizeBar, ...(sizePct > 85 ? S.sizeBarFull : {}) } },
                 `${(noteSize / 1024).toFixed(0)} KB / 1 MB (${sizePct}%)`)
             ),
-            h('textarea', { value: activeNote.body || '',
-              onChange: (e) => updateNoteFields({ body: e.target.value }),
-              placeholder: '在這裡寫工作記事…　拍照或匯入照片後，點照片即可在上面畫圖、標註。',
-              style: S.bodyArea }),
+            h('div', { style: { position: 'relative' } },
+              h('button', {
+                onClick: () => setBodyExpanded(b => !b),
+                title: bodyExpanded ? '縮小' : '放大文字欄',
+                style: { position: 'absolute', top: 8, right: 8, background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 16, zIndex: 1, lineHeight: 1 }
+              }, bodyExpanded ? '⊡' : '⊞'),
+              h('textarea', { value: activeNote.body || '',
+                onChange: (e) => updateNoteFields({ body: e.target.value }),
+                placeholder: '在這裡寫工作記事…　拍照或匯入照片後，點照片即可在上面畫圖、標註。',
+                style: { ...S.bodyArea, minHeight: bodyExpanded ? 'calc(100vh - 290px)' : 180 } })
+            ),
             (activeNote.images?.length > 0) && h('div', { style: S.imgGrid },
               ...activeNote.images.map((im, i) =>
                 h(ImageCard, { key: im.id, image: im, index: i,
-                  onAnnotate: () => setAnnotating({ noteId: activeNote.id, imgIndex: i }),
+                  onView: () => setLightbox(im),
+                  onAnnotate: () => setAnnotating({ type: 'note', imgIndex: i }),
                   onDelete: () => setConfirmDel({ type: "image", id: i }),
                   confirmingDelete: confirmDel?.type === "image" && confirmDel.id === i,
                   onConfirmDelete: () => delImage(i),
@@ -1094,12 +1219,16 @@ function App() {
           )
     ),
 
-    annotating && h(PhotoAnnotator, {
-      src: activeNote.images[annotating.imgIndex].dataUrl,
-      initialStrokes: activeNote.images[annotating.imgIndex].strokes || [],
-      initialGrayscale: !!activeNote.images[annotating.imgIndex].grayscale,
-      onSave: saveAnnotation, onClose: () => setAnnotating(null)
-    }),
+    annotating && (() => {
+      const im = annotating.type === 'task'
+        ? tasks.find(t => t.id === annotating.id)?.images[annotating.imgIndex]
+        : activeNote?.images[annotating.imgIndex];
+      return im ? h(PhotoAnnotator, {
+        src: im.dataUrl, initialStrokes: im.strokes || [], initialGrayscale: !!im.grayscale,
+        onSave: saveAnnotation, onClose: () => setAnnotating(null)
+      }) : null;
+    })(),
+    lightbox && h(Lightbox, { image: lightbox, onClose: () => setLightbox(null) }),
     newTaskModal && h(TextModal, {
       title: '新增任務', placeholder: '要做什麼？例如：寄出申請書',
       confirmText: '建立', onConfirm: addTask, onCancel: () => setNewTaskModal(false)
