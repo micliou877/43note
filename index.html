@@ -108,6 +108,25 @@ function compressImage(file) {
   });
 }
 
+function rotateImageData(dataUrl, deg) {
+  return new Promise((resolve, reject) => {
+    const img = document.createElement('img');
+    img.onload = () => {
+      const swap = deg === 90 || deg === 270;
+      const canvas = document.createElement('canvas');
+      canvas.width = swap ? img.height : img.width;
+      canvas.height = swap ? img.width : img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate((deg * Math.PI) / 180);
+      ctx.drawImage(img, -img.width / 2, -img.height / 2);
+      resolve(canvas.toDataURL('image/jpeg', JPG_QUALITY));
+    };
+    img.onerror = () => reject(new Error('旋轉失敗'));
+    img.src = dataUrl;
+  });
+}
+
 function estimateNoteSize(note) {
   let bytes = (note.title?.length || 0) + (note.body?.length || 0);
   for (const im of (note.images || [])) {
@@ -482,7 +501,7 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
   );
 }
 
-function ImageCard({ image, index, onAnnotate, onDelete, confirmingDelete, onConfirmDelete }) {
+function ImageCard({ image, index, onAnnotate, onDelete, confirmingDelete, onConfirmDelete, onRotateLeft, onRotateRight }) {
   const canvasRef = useRef(null);
   useEffect(() => {
     const img = document.createElement('img');
@@ -529,6 +548,8 @@ function ImageCard({ image, index, onAnnotate, onDelete, confirmingDelete, onCon
     h('canvas', { ref: canvasRef, style: S.thumb, onClick: onAnnotate }),
     h('div', { style: S.imgActions },
       h('button', { onClick: onAnnotate, style: S.imgActBtn }, '🎨 標註'),
+      h('button', { onClick: onRotateLeft, title: '向左旋轉', style: S.imgActBtn }, '↺'),
+      h('button', { onClick: onRotateRight, title: '向右旋轉', style: S.imgActBtn }, '↻'),
       h('a', { href: image.dataUrl, download: `note-${index + 1}.jpg`, style: S.imgActBtn }, '⬇'),
       confirmingDelete
         ? h('button', { onClick: onConfirmDelete, style: { ...S.imgActBtn, color: "#ef4444", borderColor: "#fecaca" } }, '確定')
@@ -789,6 +810,16 @@ function App() {
   const delImage = async (i) => {
     await updateNoteNow({ images: activeNote.images.filter((_, idx) => idx !== i) });
     setConfirmDel(null);
+  };
+  const rotateImage = async (imgIndex, deg) => {
+    if (!activeNote) return;
+    try {
+      const newDataUrl = await rotateImageData(activeNote.images[imgIndex].dataUrl, deg);
+      const newImages = activeNote.images.map((im, i) =>
+        i === imgIndex ? { ...im, dataUrl: newDataUrl, strokes: [] } : im
+      );
+      await updateNoteNow({ images: newImages });
+    } catch (err) { alert('旋轉失敗：' + err.message); }
   };
 
   // Tasks
@@ -1056,7 +1087,9 @@ function App() {
                   onAnnotate: () => setAnnotating({ noteId: activeNote.id, imgIndex: i }),
                   onDelete: () => setConfirmDel({ type: "image", id: i }),
                   confirmingDelete: confirmDel?.type === "image" && confirmDel.id === i,
-                  onConfirmDelete: () => delImage(i)
+                  onConfirmDelete: () => delImage(i),
+                  onRotateLeft: () => rotateImage(i, 270),
+                  onRotateRight: () => rotateImage(i, 90),
                 })))
           )
     ),
