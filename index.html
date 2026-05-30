@@ -690,11 +690,20 @@ function App() {
   const [dbError, setDbError] = useState("");
   const [lightbox, setLightbox] = useState(null);
   const [bodyExpanded, setBodyExpanded] = useState(false);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
   // 👇 這是控制手機版顯示哪一個欄位的狀態
   const [mobileView, setMobileView] = useState('sidebar'); // 'sidebar' | 'list' | 'editor'
 
   const lastLocalEdit = useRef(0);
+
+  useEffect(() => {
+    const goOnline = () => setIsOffline(false);
+    const goOffline = () => setIsOffline(true);
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+    return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline); };
+  }, []);
 
   const getSafeTime = (val) => {
     if (!val) return 0;
@@ -960,6 +969,10 @@ function App() {
   if (!authReady) return h('div', { style: { ...S.app, alignItems: 'center', justifyContent: 'center' } }, '載入中…');
   if (!user) return h(Login);
 
+  const offlineBanner = isOffline && h('div', {
+    style: { position: 'fixed', top: 0, left: 0, right: 0, background: '#fef3c7', color: '#92400e', padding: '6px 14px', fontSize: 12.5, textAlign: 'center', zIndex: 300, borderBottom: '1px solid #fde68a' }
+  }, '📵 離線模式 — 顯示快取資料，新增與修改將在恢復連線後同步');
+
   const activeProjects = projects.filter(p => !p.deleted);
   const deletedProjects = projects.filter(p => p.deleted);
   const visibleNotes = notes.filter(n => !n.deleted);
@@ -1013,6 +1026,7 @@ function App() {
   if (showTrash) {
     const trashEmpty = deletedProjects.length === 0 && allDeletedNotes.length === 0 && allDeletedTasks.length === 0;
     return h('div', { style: S.app },
+      offlineBanner,
       sidebar,
       h('main', { className: mobileView === 'list' ? 'mobile-full-width' : 'hide-on-mobile', style: { ...S.editorCol, padding: 24, overflowY: 'auto' } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 } },
@@ -1068,6 +1082,7 @@ function App() {
   }
 
   return h('div', { style: S.app },
+    offlineBanner,
     sidebar,
 
     // 渲染清單 (List Column)
@@ -1243,6 +1258,10 @@ function App() {
 }
 
 createRoot(document.getElementById('root')).render(h(App));
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
 </script>
 </body>
 </html>
