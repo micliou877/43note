@@ -616,7 +616,7 @@ function ImageCard({ image, index, onAnnotate, onDelete, confirmingDelete, onCon
   );
 }
 
-function ProjectItem({ project, isActive, onClick, onRename, onDelete, confirmingDelete, onConfirmDelete, onCancelDelete, onTogglePin }) {
+function ProjectItem({ project, isActive, onClick, onRename, onDelete, confirmingDelete, onConfirmDelete, onCancelDelete, onTogglePin, dragHandlers }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(project.name);
 
@@ -638,7 +638,8 @@ function ProjectItem({ project, isActive, onClick, onRename, onDelete, confirmin
     );
   }
 
-  return h('div', { onClick, style: { ...S.projItem, ...(isActive ? S.projItemActive : {}) } },
+  return h('div', { onClick, ...dragHandlers, style: { ...S.projItem, ...(isActive ? S.projItemActive : {}), cursor: 'default' } },
+    h('span', { style: { cursor: 'grab', color: '#cbd5e1', fontSize: 12, marginRight: 2, userSelect: 'none' } }, '⠿'),
     h('span', null, '📁'),
     h('span', { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, project.name),
     confirmingDelete
@@ -701,6 +702,8 @@ function App() {
   const [mobileView, setMobileView] = useState('sidebar'); // 'sidebar' | 'list' | 'editor'
 
   const lastLocalEdit = useRef(0);
+  const dragId   = useRef(null); // 拖曳中的 item id
+  const dragType = useRef(null); // 'project' | 'note' | 'task'
 
   useEffect(() => {
     const goOnline = () => setIsOffline(false);
@@ -773,7 +776,7 @@ function App() {
   // Projects
   const createProject = async (name) => {
     try {
-      const docRef = await addDoc(collection(db, `users/${user.uid}/projects`), { name, created: serverTimestamp(), deleted: false, pinned: false });
+      const docRef = await addDoc(collection(db, `users/${user.uid}/projects`), { name, created: serverTimestamp(), deleted: false, pinned: false, sortOrder: Date.now() });
       setCreatingProj(false);
       setActiveProject({ id: docRef.id, name });
       setActiveNote(null);
@@ -807,7 +810,7 @@ function App() {
   const addNote = async () => {
     try {
       const newNote = {
-        projectId: activeProject.id, title: "", body: "", images: [], deleted: false, pinned: false,
+        projectId: activeProject.id, title: "", body: "", images: [], deleted: false, pinned: false, sortOrder: Date.now(),
         created: serverTimestamp(), updated: serverTimestamp(),
       };
       const docRef = await addDoc(collection(db, `users/${user.uid}/notes`), newNote);
@@ -937,7 +940,7 @@ function App() {
     try {
       const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("連線逾時")), 5000));
       const addPromise = addDoc(collection(db, `users/${user.uid}/tasks`), {
-        projectId: activeProject.id, title, done: false, deleted: false, images: [], pinned: false,
+        projectId: activeProject.id, title, done: false, deleted: false, images: [], pinned: false, sortOrder: Date.now(),
         created: serverTimestamp(),
       });
       await Promise.race([addPromise, timeout]);
@@ -958,6 +961,20 @@ function App() {
     await updateDoc(doc(db, `users/${user.uid}/tasks/${id}`), {
       done: false, doneReason: null, doneAt: null
     });
+  };
+  const reorder = async (type, items, fromId, toId) => {
+    const fromIdx = items.findIndex(it => it.id === fromId);
+    const toIdx   = items.findIndex(it => it.id === toId);
+    if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return;
+    const arr = [...items];
+    const [moved] = arr.splice(fromIdx, 1);
+    arr.splice(toIdx, 0, moved);
+    const batch = writeBatch(db);
+    const col = type === 'project' ? `users/${user.uid}/projects`
+      : type === 'note' ? `users/${user.uid}/notes`
+      : `users/${user.uid}/tasks`;
+    arr.forEach((item, idx) => batch.update(doc(db, `${col}/${item.id}`), { sortOrder: (idx + 1) * 1000 }));
+    await batch.commit();
   };
   const toggleProjectPin = async (id, pinned) => {
     await updateDoc(doc(db, `users/${user.uid}/projects/${id}`), { pinned: !pinned });
@@ -992,21 +1009,29 @@ function App() {
     style: { position: 'fixed', top: 0, left: 0, right: 0, background: '#fef3c7', color: '#92400e', padding: '6px 14px', fontSize: 12.5, textAlign: 'center', zIndex: 300, borderBottom: '1px solid #fde68a' }
   }, '📵 離線模式 — 顯示快取資料，新增與修改將在恢復連線後同步');
 
-  const pinFirst = (a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
+  // 排序優先順序：釘選 > 拖曳自訂順序(sortOrder) > 預設排序
+  const byOrder = (a, b) => {
+    const pin = (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
+    if (pin !== 0) return pin;
+    if (a.sortOrder != null && b.sortOrder != null) return a.sortOrder - b.sortOrder;
+    if (a.sortOrder != null) return -1;
+    if (b.sortOrder != null) return 1;
+    return 0;
+  };
   const activeProjects = projects.filter(p => !p.deleted).sort((a, b) =>
-    pinFirst(a, b) || getSafeTime(b.created) - getSafeTime(a.created));
+    byOrder(a, b) || getSafeTime(b.created) - getSafeTime(a.created));
   const deletedProjects = projects.filter(p => p.deleted);
   const visibleNotes = notes.filter(n => !n.deleted);
   const visibleTasks = tasks.filter(t => !t.deleted);
 
   const sortedNotes = [...visibleNotes].sort((a, b) => {
-    const pin = pinFirst(a, b); if (pin !== 0) return pin;
+    const ord = byOrder(a, b); if (ord !== 0) return ord;
     if (noteSort === 'name') return (a.title || '').localeCompare(b.title || '');
     if (noteSort === 'created') return getSafeTime(b.created) - getSafeTime(a.created);
     return getSafeTime(b.updated) - getSafeTime(a.updated);
   });
   const sortedTasks = [...visibleTasks].sort((a, b) => {
-    const pin = pinFirst(a, b); if (pin !== 0) return pin;
+    const ord = byOrder(a, b); if (ord !== 0) return ord;
     if (taskSort === 'name') return (a.title || '').localeCompare(b.title || '');
     if (taskSort === 'done') return (a.done ? 1 : 0) - (b.done ? 1 : 0);
     return getSafeTime(b.created) - getSafeTime(a.created);
@@ -1037,6 +1062,14 @@ function App() {
           onConfirmDelete: () => trashProject(p.id),
           onCancelDelete: () => setConfirmDel(null),
           onTogglePin: () => toggleProjectPin(p.id, p.pinned),
+          dragHandlers: {
+            draggable: true,
+            onDragStart: (e) => { dragId.current = p.id; dragType.current = 'project'; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.style.opacity = '0.4'; },
+            onDragEnd:   (e) => { e.currentTarget.style.opacity = '1'; dragId.current = null; },
+            onDragOver:  (e) => { e.preventDefault(); e.currentTarget.style.background = '#f0fdfa'; },
+            onDragLeave: (e) => { e.currentTarget.style.background = ''; },
+            onDrop:      (e) => { e.preventDefault(); e.currentTarget.style.background = ''; if (dragId.current && dragId.current !== p.id && dragType.current === 'project') reorder('project', activeProjects, dragId.current, p.id); dragId.current = null; },
+          },
         }))
     ),
     h('button', {
@@ -1152,9 +1185,17 @@ function App() {
         tab === 'notes' && h('div', null,
           filtered.length === 0 && h('div', { style: S.empty }, search ? '找不到符合的筆記' : '點「新筆記」開始'),
           ...filtered.map((n) =>
-            h('div', { key: n.id, onClick: () => { setActiveNote(n); setMobileView('editor'); },
+            h('div', { key: n.id,
+              onClick: () => { setActiveNote(n); setMobileView('editor'); },
+              draggable: true,
+              onDragStart: (e) => { dragId.current = n.id; dragType.current = 'note'; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.style.opacity = '0.4'; },
+              onDragEnd:   (e) => { e.currentTarget.style.opacity = '1'; dragId.current = null; },
+              onDragOver:  (e) => { e.preventDefault(); e.currentTarget.style.borderTop = '2px solid #0d9488'; },
+              onDragLeave: (e) => { e.currentTarget.style.borderTop = ''; },
+              onDrop:      (e) => { e.preventDefault(); e.currentTarget.style.borderTop = ''; if (dragId.current && dragId.current !== n.id && dragType.current === 'note') reorder('note', filtered, dragId.current, n.id); dragId.current = null; },
               style: { ...S.noteItem, ...(activeNote?.id === n.id ? S.noteItemActive : {}) } },
               h('div', { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 4 } },
+                h('span', { style: { cursor: 'grab', color: '#cbd5e1', fontSize: 12, userSelect: 'none', flexShrink: 0 } }, '⠿'),
                 n.pinned && h('span', { style: { fontSize: 11, color: '#0d9488', flexShrink: 0 } }, '📌'),
                 h('span', { style: { fontWeight: 600, fontSize: 14, color: "#1f2937", flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, n.title || '未命名筆記'),
                 h('span', { onClick: (e) => { e.stopPropagation(); toggleNotePin(n.id, n.pinned); },
@@ -1176,7 +1217,15 @@ function App() {
           ),
           sortedTasks.length === 0 && h('div', { style: S.empty }, '點「新任務」開始'),
           ...sortedTasks.map(t =>
-            h('div', { key: t.id, style: S.taskItem },
+            h('div', { key: t.id,
+              draggable: true,
+              onDragStart: (e) => { dragId.current = t.id; dragType.current = 'task'; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.style.opacity = '0.4'; },
+              onDragEnd:   (e) => { e.currentTarget.style.opacity = '1'; dragId.current = null; },
+              onDragOver:  (e) => { e.preventDefault(); e.currentTarget.style.borderTop = '2px solid #0d9488'; },
+              onDragLeave: (e) => { e.currentTarget.style.borderTop = ''; },
+              onDrop:      (e) => { e.preventDefault(); e.currentTarget.style.borderTop = ''; if (dragId.current && dragId.current !== t.id && dragType.current === 'task') reorder('task', sortedTasks, dragId.current, t.id); dragId.current = null; },
+              style: S.taskItem },
+              h('span', { style: { cursor: 'grab', color: '#cbd5e1', fontSize: 12, userSelect: 'none', alignSelf: 'flex-start', paddingTop: 3, marginRight: -4 } }, '⠿'),
               h('div', {
                 onClick: () => { if (t.done) uncompleteTask(t.id); else setCompleteTaskId(t.id); },
                 style: { ...S.taskCheck, ...(t.done ? S.taskCheckDone : {}) }
