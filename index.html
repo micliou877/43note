@@ -616,7 +616,7 @@ function ImageCard({ image, index, onAnnotate, onDelete, confirmingDelete, onCon
   );
 }
 
-function ProjectItem({ project, isActive, onClick, onRename, onDelete, confirmingDelete, onConfirmDelete, onCancelDelete }) {
+function ProjectItem({ project, isActive, onClick, onRename, onDelete, confirmingDelete, onConfirmDelete, onCancelDelete, onTogglePin }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(project.name);
 
@@ -645,7 +645,9 @@ function ProjectItem({ project, isActive, onClick, onRename, onDelete, confirmin
       ? h('span', { style: { display: "flex", gap: 8 } },
           h('span', { style: { color: '#ef4444', cursor: 'pointer' }, onClick: (e) => { e.stopPropagation(); onConfirmDelete(); } }, '✓'),
           h('span', { style: { color: '#9ca3af', cursor: 'pointer' }, onClick: (e) => { e.stopPropagation(); onCancelDelete(); } }, '✕'))
-      : h('span', { style: { display: 'flex', gap: 6 } },
+      : h('span', { style: { display: 'flex', gap: 6, alignItems: 'center' } },
+          h('span', { onClick: (e) => { e.stopPropagation(); onTogglePin(); },
+            style: { cursor: 'pointer', fontSize: 11, opacity: project.pinned ? 1 : 0.25, color: project.pinned ? '#0d9488' : '#64748b' }, title: project.pinned ? '取消釘選' : '釘選' }, '📌'),
           h('span', { onClick: (e) => { e.stopPropagation(); setEditing(true); setVal(project.name); },
             style: { color: '#cbd5e1', cursor: 'pointer', fontSize: 13 }, title: '改名' }, '✏️'),
           h('span', { onClick: (e) => { e.stopPropagation(); onDelete(); },
@@ -687,6 +689,8 @@ function App() {
   const [newTaskModal, setNewTaskModal] = useState(false);
   const [completeTaskId, setCompleteTaskId] = useState(null);
   const [editingTask, setEditingTask] = useState(null); // { id, title }
+  const [noteSort, setNoteSort] = useState('updated');  // 'updated' | 'created' | 'name'
+  const [taskSort, setTaskSort] = useState('created');  // 'created' | 'name' | 'done'
   const [permDelConfirm, setPermDelConfirm] = useState(null);
   const [dbError, setDbError] = useState("");
   const [lightbox, setLightbox] = useState(null);
@@ -769,7 +773,7 @@ function App() {
   // Projects
   const createProject = async (name) => {
     try {
-      const docRef = await addDoc(collection(db, `users/${user.uid}/projects`), { name, created: serverTimestamp(), deleted: false });
+      const docRef = await addDoc(collection(db, `users/${user.uid}/projects`), { name, created: serverTimestamp(), deleted: false, pinned: false });
       setCreatingProj(false);
       setActiveProject({ id: docRef.id, name });
       setActiveNote(null);
@@ -803,7 +807,7 @@ function App() {
   const addNote = async () => {
     try {
       const newNote = {
-        projectId: activeProject.id, title: "", body: "", images: [], deleted: false,
+        projectId: activeProject.id, title: "", body: "", images: [], deleted: false, pinned: false,
         created: serverTimestamp(), updated: serverTimestamp(),
       };
       const docRef = await addDoc(collection(db, `users/${user.uid}/notes`), newNote);
@@ -933,7 +937,7 @@ function App() {
     try {
       const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("連線逾時")), 5000));
       const addPromise = addDoc(collection(db, `users/${user.uid}/tasks`), {
-        projectId: activeProject.id, title, done: false, deleted: false, images: [],
+        projectId: activeProject.id, title, done: false, deleted: false, images: [], pinned: false,
         created: serverTimestamp(),
       });
       await Promise.race([addPromise, timeout]);
@@ -954,6 +958,15 @@ function App() {
     await updateDoc(doc(db, `users/${user.uid}/tasks/${id}`), {
       done: false, doneReason: null, doneAt: null
     });
+  };
+  const toggleProjectPin = async (id, pinned) => {
+    await updateDoc(doc(db, `users/${user.uid}/projects/${id}`), { pinned: !pinned });
+  };
+  const toggleNotePin = async (id, pinned) => {
+    await updateDoc(doc(db, `users/${user.uid}/notes/${id}`), { pinned: !pinned });
+  };
+  const toggleTaskPin = async (id, pinned) => {
+    await updateDoc(doc(db, `users/${user.uid}/tasks/${id}`), { pinned: !pinned });
   };
   const updateTaskTitle = async (id, title) => {
     if (!title.trim()) { setEditingTask(null); return; }
@@ -979,11 +992,26 @@ function App() {
     style: { position: 'fixed', top: 0, left: 0, right: 0, background: '#fef3c7', color: '#92400e', padding: '6px 14px', fontSize: 12.5, textAlign: 'center', zIndex: 300, borderBottom: '1px solid #fde68a' }
   }, '📵 離線模式 — 顯示快取資料，新增與修改將在恢復連線後同步');
 
-  const activeProjects = projects.filter(p => !p.deleted);
+  const pinFirst = (a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
+  const activeProjects = projects.filter(p => !p.deleted).sort((a, b) =>
+    pinFirst(a, b) || getSafeTime(b.created) - getSafeTime(a.created));
   const deletedProjects = projects.filter(p => p.deleted);
   const visibleNotes = notes.filter(n => !n.deleted);
   const visibleTasks = tasks.filter(t => !t.deleted);
-  const filtered = visibleNotes.filter((n) => !search || (n.title || '').includes(search) || (n.body || '').includes(search));
+
+  const sortedNotes = [...visibleNotes].sort((a, b) => {
+    const pin = pinFirst(a, b); if (pin !== 0) return pin;
+    if (noteSort === 'name') return (a.title || '').localeCompare(b.title || '');
+    if (noteSort === 'created') return getSafeTime(b.created) - getSafeTime(a.created);
+    return getSafeTime(b.updated) - getSafeTime(a.updated);
+  });
+  const sortedTasks = [...visibleTasks].sort((a, b) => {
+    const pin = pinFirst(a, b); if (pin !== 0) return pin;
+    if (taskSort === 'name') return (a.title || '').localeCompare(b.title || '');
+    if (taskSort === 'done') return (a.done ? 1 : 0) - (b.done ? 1 : 0);
+    return getSafeTime(b.created) - getSafeTime(a.created);
+  });
+  const filtered = sortedNotes.filter((n) => !search || (n.title || '').includes(search) || (n.body || '').includes(search));
 
   let noteSize = 0, sizePct = 0;
   if (activeNote) {
@@ -1008,6 +1036,7 @@ function App() {
           confirmingDelete: confirmDel?.type === "project" && confirmDel.id === p.id,
           onConfirmDelete: () => trashProject(p.id),
           onCancelDelete: () => setConfirmDel(null),
+          onTogglePin: () => toggleProjectPin(p.id, p.pinned),
         }))
     ),
     h('button', {
@@ -1105,14 +1134,19 @@ function App() {
       h('div', { style: S.tabBar },
         h('div', { onClick: () => setTab('notes'), style: { ...S.tab, ...(tab === 'notes' ? S.tabActive : {}) } }, `筆記 (${visibleNotes.length})`),
         h('div', { onClick: () => setTab('tasks'), style: { ...S.tab, ...(tab === 'tasks' ? S.tabActive : {}) } },
-          `任務 (${visibleTasks.filter(t => !t.done).length}/${visibleTasks.length})`)
+          `任務 (${sortedTasks.filter(t => !t.done).length}/${sortedTasks.length})`)
       ),
       
       dbError && h('div', { style: { background: '#fecaca', color: '#991b1b', padding: '10px 14px', margin: '14px 14px 0', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' } }, `⚠️ ${dbError}`),
 
       tab === 'notes' && h('div', { style: S.searchBox },
         h('span', null, '🔍'),
-        h('input', { value: search, onChange: (e) => setSearch(e.target.value), placeholder: '搜尋筆記…', style: S.searchInput })
+        h('input', { value: search, onChange: (e) => setSearch(e.target.value), placeholder: '搜尋筆記…', style: S.searchInput }),
+        h('select', { value: noteSort, onChange: (e) => setNoteSort(e.target.value),
+          style: { border: 'none', background: 'transparent', color: '#94a3b8', fontSize: 11, cursor: 'pointer', outline: 'none', flexShrink: 0 } },
+          h('option', { value: 'updated' }, '最近編輯'),
+          h('option', { value: 'created' }, '建立時間'),
+          h('option', { value: 'name' }, '名稱 A-Z'))
       ),
       h('div', { style: { overflowY: "auto", flex: 1 } },
         tab === 'notes' && h('div', null,
@@ -1120,16 +1154,28 @@ function App() {
           ...filtered.map((n) =>
             h('div', { key: n.id, onClick: () => { setActiveNote(n); setMobileView('editor'); },
               style: { ...S.noteItem, ...(activeNote?.id === n.id ? S.noteItemActive : {}) } },
-              h('div', { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
-                h('span', { style: { fontWeight: 600, fontSize: 14, color: "#1f2937" } }, n.title || '未命名筆記'),
+              h('div', { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 4 } },
+                n.pinned && h('span', { style: { fontSize: 11, color: '#0d9488', flexShrink: 0 } }, '📌'),
+                h('span', { style: { fontWeight: 600, fontSize: 14, color: "#1f2937", flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, n.title || '未命名筆記'),
+                h('span', { onClick: (e) => { e.stopPropagation(); toggleNotePin(n.id, n.pinned); },
+                  title: n.pinned ? '取消釘選' : '釘選',
+                  style: { cursor: 'pointer', fontSize: 11, opacity: n.pinned ? 1 : 0.2, color: '#0d9488', flexShrink: 0 } }, '📌'),
                 (n.images?.length > 0) && h('span', { style: S.imgBadge }, `📷 ${n.images.length}`)),
               h('div', { style: S.notePreview }, n.body || '（無內容）'),
               h('div', { style: S.noteDate }, fmt(n.updated))
             ))
         ),
         tab === 'tasks' && h('div', null,
-          visibleTasks.length === 0 && h('div', { style: S.empty }, '點「新任務」開始'),
-          ...visibleTasks.map(t =>
+          h('div', { style: { display: 'flex', alignItems: 'center', padding: '6px 14px', borderBottom: '1px solid #f1f5f9', gap: 4 } },
+            h('span', { style: { fontSize: 11, color: '#94a3b8' } }, '排序'),
+            h('select', { value: taskSort, onChange: (e) => setTaskSort(e.target.value),
+              style: { border: 'none', background: 'transparent', color: '#94a3b8', fontSize: 11, cursor: 'pointer', outline: 'none' } },
+              h('option', { value: 'created' }, '建立時間'),
+              h('option', { value: 'name' }, '名稱 A-Z'),
+              h('option', { value: 'done' }, '未完成優先'))
+          ),
+          sortedTasks.length === 0 && h('div', { style: S.empty }, '點「新任務」開始'),
+          ...sortedTasks.map(t =>
             h('div', { key: t.id, style: S.taskItem },
               h('div', {
                 onClick: () => { if (t.done) uncompleteTask(t.id); else setCompleteTaskId(t.id); },
@@ -1157,6 +1203,9 @@ function App() {
                     t.done && t.doneReason && h('div', { style: S.taskReason }, `✓ ${t.doneReason}`),
                     h('div', { style: S.taskMeta }, t.done ? `完成於 ${fmt(t.doneAt)}` : `建立於 ${fmt(t.created)}`)
                   ),
+                  h('span', { onClick: () => toggleTaskPin(t.id, t.pinned),
+                    title: t.pinned ? '取消釘選' : '釘選',
+                    style: { cursor: 'pointer', fontSize: 11, opacity: t.pinned ? 1 : 0.2, color: '#0d9488', flexShrink: 0 } }, '📌'),
                   h('label', { style: { ...S.imgActBtn, cursor: 'pointer', flexShrink: 0, margin: 0 }, title: '加照片' },
                     '📷',
                     h('input', { type: 'file', accept: 'image/*', multiple: true, onChange: (e) => onPickTaskImage(t.id, e), style: { display: 'none' } })
