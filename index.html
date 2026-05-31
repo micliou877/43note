@@ -686,6 +686,7 @@ function App() {
   const [showTrash, setShowTrash] = useState(false);
   const [newTaskModal, setNewTaskModal] = useState(false);
   const [completeTaskId, setCompleteTaskId] = useState(null);
+  const [editingTask, setEditingTask] = useState(null); // { id, title }
   const [permDelConfirm, setPermDelConfirm] = useState(null);
   const [dbError, setDbError] = useState("");
   const [lightbox, setLightbox] = useState(null);
@@ -954,6 +955,11 @@ function App() {
       done: false, doneReason: null, doneAt: null
     });
   };
+  const updateTaskTitle = async (id, title) => {
+    if (!title.trim()) { setEditingTask(null); return; }
+    await updateDoc(doc(db, `users/${user.uid}/tasks/${id}`), { title: title.trim() });
+    setEditingTask(null);
+  };
   const trashTask = async (id) => {
     await updateDoc(doc(db, `users/${user.uid}/tasks/${id}`), { deleted: true, deletedAt: serverTimestamp() });
     setConfirmDel(null);
@@ -1132,7 +1138,22 @@ function App() {
               h('div', { style: { flex: 1 } },
                 h('div', { style: { display: 'flex', alignItems: 'flex-start', gap: 6 } },
                   h('div', { style: { flex: 1 } },
-                    h('div', { style: { ...S.taskTitle, ...(t.done ? S.taskTitleDone : {}) } }, t.title),
+                    editingTask?.id === t.id
+                      ? h('input', {
+                          autoFocus: true,
+                          value: editingTask.title,
+                          onChange: (e) => setEditingTask({ ...editingTask, title: e.target.value }),
+                          onKeyDown: (e) => {
+                            if (e.key === 'Enter') updateTaskTitle(editingTask.id, editingTask.title);
+                            if (e.key === 'Escape') setEditingTask(null);
+                          },
+                          onBlur: () => updateTaskTitle(editingTask.id, editingTask.title),
+                          style: { width: '100%', fontSize: 14, border: '1px solid #0d9488', borderRadius: 6, padding: '4px 8px', outline: 'none', color: '#1f2937', background: '#f0fdfa', boxSizing: 'border-box' }
+                        })
+                      : h('div', {
+                          style: { ...S.taskTitle, ...(t.done ? S.taskTitleDone : {}), cursor: t.done ? 'default' : 'text' },
+                          onClick: () => { if (!t.done) setEditingTask({ id: t.id, title: t.title }); }
+                        }, t.title),
                     t.done && t.doneReason && h('div', { style: S.taskReason }, `✓ ${t.doneReason}`),
                     h('div', { style: S.taskMeta }, t.done ? `完成於 ${fmt(t.doneAt)}` : `建立於 ${fmt(t.created)}`)
                   ),
