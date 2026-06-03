@@ -706,11 +706,12 @@ function App() {
   const lastLocalEdit = useRef(0);
   const dragId        = useRef(null);
   const dragType      = useRef(null);
-  const autoSaveTimer = useRef(null);
-  const isDirty       = useRef(false);
-  const activeNoteRef = useRef(null);
-  const doAutoSaveRef = useRef(null);
+  const autoSaveTimer  = useRef(null);
+  const isDirty        = useRef(false);
+  const activeNoteRef  = useRef(null);
+  const doAutoSaveRef  = useRef(null);
   const saveIfDirtyRef = useRef(null);
+  const swipeStart     = useRef(null);
 
   useEffect(() => {
     const goOnline = () => setIsOffline(false);
@@ -1181,8 +1182,33 @@ function App() {
     sizePct = Math.min(100, Math.round(noteSize / 10000));
   }
 
+  // 手機向左滑 → 上一頁，向右滑 → 下一頁
+  const swipeHandlers = (view) => ({
+    onTouchStart: (e) => {
+      const t = e.touches[0];
+      swipeStart.current = { x: t.clientX, y: t.clientY };
+    },
+    onTouchEnd: (e) => {
+      if (!swipeStart.current) return;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - swipeStart.current.x;
+      const dy = t.clientY - swipeStart.current.y;
+      swipeStart.current = null;
+      if (Math.abs(dy) > Math.abs(dx) || Math.abs(dx) < 60) return;
+      if (dx < 0) {
+        // 向左滑 → 上一頁
+        if (view === 'editor') { saveIfDirtyRef.current?.(); setMobileView('list'); }
+        else if (view === 'list' || view === 'trash') setMobileView('sidebar');
+      } else {
+        // 向右滑 → 下一頁
+        if (view === 'sidebar' && activeProject) setMobileView('list');
+        else if (view === 'list' && activeNote && tab === 'notes') setMobileView('editor');
+      }
+    },
+  });
+
   // 渲染專案列表 (Sidebar)
-  const sidebar = h('aside', { className: mobileView === 'sidebar' ? 'mobile-full-width' : 'hide-on-mobile', style: S.sidebar },
+  const sidebar = h('aside', { className: mobileView === 'sidebar' ? 'mobile-full-width' : 'hide-on-mobile', style: S.sidebar, ...swipeHandlers('sidebar') },
     h('div', { style: S.brand }, '📷 照片筆記'),
     !showTrash && (creatingProj
       ? h(NewProjectInput, { onConfirm: createProject, onCancel: () => setCreatingProj(false) })
@@ -1260,7 +1286,7 @@ function App() {
     return h('div', { style: S.app },
       offlineBanner,
       sidebar,
-      h('main', { className: mobileView === 'list' ? 'mobile-full-width' : 'hide-on-mobile', style: { ...S.editorCol, padding: 24, overflowY: 'auto' } },
+      h('main', { className: mobileView === 'list' ? 'mobile-full-width' : 'hide-on-mobile', style: { ...S.editorCol, padding: 24, overflowY: 'auto' }, ...swipeHandlers('trash') },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 } },
           h('button', { className: 'mobile-only', onClick: () => setMobileView('sidebar'), style: { background: 'none', border: 'none', fontSize: 24, padding: '0 8px', cursor: 'pointer', color: '#64748b' } }, '‹'),
           h('h2', { style: { margin: 0 } }, '🗑️ 垃圾桶')
@@ -1318,7 +1344,7 @@ function App() {
     sidebar,
 
     // 渲染清單 (List Column)
-    activeProject && h('section', { className: mobileView === 'list' ? 'mobile-full-width' : 'hide-on-mobile', style: S.listCol },
+    activeProject && h('section', { className: mobileView === 'list' ? 'mobile-full-width' : 'hide-on-mobile', style: S.listCol, ...swipeHandlers('list') },
       h('div', { style: S.listHead },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
           h('button', { className: 'mobile-only', onClick: () => setMobileView('sidebar'), style: { background: 'none', border: 'none', fontSize: 24, padding: '0 4px', cursor: 'pointer', color: '#64748b' } }, '‹'),
@@ -1449,7 +1475,7 @@ function App() {
     ),
 
     // 渲染筆記編輯器 (Editor Column)
-    h('main', { className: mobileView === 'editor' ? 'mobile-full-width' : 'hide-on-mobile', style: S.editorCol },
+    h('main', { className: mobileView === 'editor' ? 'mobile-full-width' : 'hide-on-mobile', style: S.editorCol, ...swipeHandlers('editor') },
       !activeProject
         ? h('div', { style: { ...S.placeholder, position: 'relative' } }, 
             h('div', { style: { fontSize: 48 } }, '📁'), h('p', null, '選擇或新增一個專案開始記錄')
