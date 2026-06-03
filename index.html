@@ -697,13 +697,20 @@ function App() {
   const [lightbox, setLightbox] = useState(null);
   const [bodyExpanded, setBodyExpanded] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [saveStatus, setSaveStatus] = useState('idle'); // 'idle' | 'unsaved' | 'saving' | 'saved'
+  const [backupLoading, setBackupLoading] = useState(false);
 
   // 👇 這是控制手機版顯示哪一個欄位的狀態
   const [mobileView, setMobileView] = useState('sidebar'); // 'sidebar' | 'list' | 'editor'
 
   const lastLocalEdit = useRef(0);
-  const dragId   = useRef(null); // 拖曳中的 item id
-  const dragType = useRef(null); // 'project' | 'note' | 'task'
+  const dragId        = useRef(null);
+  const dragType      = useRef(null);
+  const autoSaveTimer = useRef(null);
+  const isDirty       = useRef(false);
+  const activeNoteRef = useRef(null);
+  const doAutoSaveRef = useRef(null);
+  const saveIfDirtyRef = useRef(null);
 
   useEffect(() => {
     const goOnline = () => setIsOffline(false);
@@ -711,6 +718,16 @@ function App() {
     window.addEventListener('online', goOnline);
     window.addEventListener('offline', goOffline);
     return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline); };
+  }, []);
+
+  useEffect(() => { activeNoteRef.current = activeNote; }, [activeNote]);
+
+  useEffect(() => {
+    const onBeforeUnload = (e) => {
+      if (isDirty.current) { e.preventDefault(); e.returnValue = ''; }
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, []);
 
   const getSafeTime = (val) => {
@@ -808,6 +825,9 @@ function App() {
 
   // Notes
   const addNote = async () => {
+    saveIfDirtyRef.current?.();
+    isDirty.current = false;
+    setSaveStatus('idle');
     try {
       const newNote = {
         projectId: activeProject.id, title: "", body: "", images: [], deleted: false, pinned: false, sortOrder: Date.now(),
@@ -822,18 +842,30 @@ function App() {
   const updateNoteFields = (patch) => {
     lastLocalEdit.current = Date.now();
     setActiveNote(cur => ({ ...cur, ...patch }));
+    isDirty.current = true;
+    setSaveStatus('unsaved');
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => doAutoSaveRef.current?.(), 2000);
   };
 
   const manualSaveNote = async () => {
     if (!activeNote?.id) return;
+    if (autoSaveTimer.current) { clearTimeout(autoSaveTimer.current); autoSaveTimer.current = null; }
+    isDirty.current = false;
+    setSaveStatus('saving');
     try {
       await updateDoc(doc(db, `users/${user.uid}/notes/${activeNote.id}`), {
         title: activeNote.title || '',
         body: activeNote.body || '',
         updated: serverTimestamp()
       });
+      setSaveStatus('saved');
       alert('💾 筆記儲存成功！');
-    } catch (err) { alert('儲存失敗：' + err.message); }
+    } catch (err) {
+      isDirty.current = true;
+      setSaveStatus('unsaved');
+      alert('儲存失敗：' + err.message);
+    }
   };
 
   const updateNoteNow = async (patch) => {
@@ -1002,6 +1034,111 @@ function App() {
     setPermDelConfirm(null);
   };
 
+  const BACKUP_LS_KEY = `lastBackupAt_${user?.uid || ''}`;
+
+  const exportBackup = async () => {
+    setBackupLoading(true);
+    try {
+      const [projSnap, noteSnap, taskSnap] = await Promise.all([
+        getDocs(collection(db, `users/${user.uid}/projects`)),
+        getDocs(collection(db, `users/${user.uid}/notes`)),
+        getDocs(collection(db, `users/${user.uid}/tasks`)),
+      ]);
+      const data = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        uid: user.uid,
+        projects: projSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+        notes:    noteSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+        tasks:    taskSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+      };
+      const json = JSON.stringify(data, (_, v) =>
+        v && typeof v.toDate === 'function' ? v.toDate().toISOString() : v, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `照片筆記備份_${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      localStorage.setItem(BACKUP_LS_KEY, Date.now().toString());
+      alert(`✅ 備份完成！\n\n專案 ${data.projects.length} 個、筆記 ${data.notes.length} 筆、任務 ${data.tasks.length} 個。\n\n請妥善保存備份檔案。`);
+    } catch (err) { alert('備份失敗：' + err.message); }
+    finally { setBackupLoading(false); }
+  };
+
+  const importBackup = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    let data;
+    try { data = JSON.parse(await file.text()); } catch { alert('檔案格式錯誤，請選擇正確的備份檔案。'); return; }
+    if (!data.version || !Array.isArray(data.projects) || !Array.isArray(data.notes)) {
+      alert('備份檔案格式不符，無法還原。'); return;
+    }
+    const ok = window.confirm(
+      `準備還原備份：\n• 專案 ${data.projects.length} 個\n• 筆記 ${data.notes.length} 筆\n• 任務 ${(data.tasks||[]).length} 個\n\n` +
+      `備份時間：${new Date(data.exportedAt).toLocaleString()}\n\n` +
+      `這會在現有資料以外「新增」備份中缺少的項目，不會刪除或覆蓋既有資料。確定繼續？`
+    );
+    if (!ok) return;
+    setBackupLoading(true);
+    try {
+      const [ep, en, et] = await Promise.all([
+        getDocs(collection(db, `users/${user.uid}/projects`)),
+        getDocs(collection(db, `users/${user.uid}/notes`)),
+        getDocs(collection(db, `users/${user.uid}/tasks`)),
+      ]);
+      const existP = new Set(ep.docs.map(d => d.id));
+      const existN = new Set(en.docs.map(d => d.id));
+      const existT = new Set(et.docs.map(d => d.id));
+      const items = [
+        ...(data.projects||[]).filter(p => !existP.has(p.id)).map(p => ({ col: 'projects', ...p })),
+        ...(data.notes||[]).filter(n => !existN.has(n.id)).map(n => ({ col: 'notes', ...n })),
+        ...(data.tasks||[]).filter(t => !existT.has(t.id)).map(t => ({ col: 'tasks', ...t })),
+      ];
+      if (items.length === 0) { alert('備份中的所有資料在目前帳號已存在，無需還原。'); setBackupLoading(false); return; }
+      for (let i = 0; i < items.length; i += 400) {
+        const batch = writeBatch(db);
+        items.slice(i, i + 400).forEach(({ col, id, ...fields }) =>
+          batch.set(doc(db, `users/${user.uid}/${col}/${id}`), fields));
+        await batch.commit();
+      }
+      alert(`✅ 還原完成！共新增 ${items.length} 筆資料。`);
+    } catch (err) { alert('還原失敗：' + err.message); }
+    finally { setBackupLoading(false); }
+  };
+
+  doAutoSaveRef.current = async () => {
+    const note = activeNoteRef.current;
+    if (!note?.id || !isDirty.current) return;
+    isDirty.current = false;
+    setSaveStatus('saving');
+    try {
+      await updateDoc(doc(db, `users/${user.uid}/notes/${note.id}`), {
+        title: note.title || '',
+        body: note.body || '',
+        updated: serverTimestamp()
+      });
+      setSaveStatus('saved');
+    } catch (err) {
+      isDirty.current = true;
+      setSaveStatus('unsaved');
+    }
+  };
+  saveIfDirtyRef.current = () => {
+    if (!isDirty.current) return;
+    const note = activeNoteRef.current;
+    if (!note?.id) return;
+    if (autoSaveTimer.current) { clearTimeout(autoSaveTimer.current); autoSaveTimer.current = null; }
+    isDirty.current = false;
+    updateDoc(doc(db, `users/${user.uid}/notes/${note.id}`), {
+      title: note.title || '',
+      body: note.body || '',
+      updated: serverTimestamp()
+    }).catch(() => {});
+  };
+
   if (!authReady) return h('div', { style: { ...S.app, alignItems: 'center', justifyContent: 'center' } }, '載入中…');
   if (!user) return h(Login);
 
@@ -1055,7 +1192,7 @@ function App() {
       !showTrash && activeProjects.map((p) =>
         h(ProjectItem, {
           key: p.id, project: p, isActive: activeProject?.id === p.id,
-          onClick: () => { setActiveProject(p); setActiveNote(null); setSearch(""); setTab('notes'); setMobileView('list'); },
+          onClick: () => { saveIfDirtyRef.current?.(); setSaveStatus('idle'); setActiveProject(p); setActiveNote(null); setSearch(""); setTab('notes'); setMobileView('list'); },
           onRename: (name) => renameProject(p.id, name),
           onDelete: () => setConfirmDel({ type: "project", id: p.id }),
           confirmingDelete: confirmDel?.type === "project" && confirmDel.id === p.id,
@@ -1073,16 +1210,43 @@ function App() {
         }))
     ),
     h('button', {
-      onClick: () => { 
-        setShowTrash(t => { 
+      onClick: () => {
+        saveIfDirtyRef.current?.();
+        setSaveStatus('idle');
+        setShowTrash(t => {
           const isOpening = !t;
-          setMobileView(isOpening ? 'list' : 'sidebar'); 
-          return isOpening; 
-        }); 
-        setActiveProject(null); setActiveNote(null); 
+          setMobileView(isOpening ? 'list' : 'sidebar');
+          return isOpening;
+        });
+        setActiveProject(null); setActiveNote(null);
       },
       style: { ...S.trashBtn, ...(showTrash ? S.trashBtnActive : {}) }
     }, '🗑️ 垃圾桶'),
+    (() => {
+      const lastBackup = parseInt(localStorage.getItem(BACKUP_LS_KEY) || '0');
+      const daysSince = lastBackup ? Math.floor((Date.now() - lastBackup) / 86400000) : null;
+      const overdue = daysSince === null || daysSince >= 7;
+      return h('div', { style: { borderTop: '1px solid #f1f5f9', paddingTop: 8, marginTop: 4 } },
+        overdue && h('div', { style: { fontSize: 11, color: '#92400e', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 6, padding: '5px 8px', marginBottom: 6, lineHeight: 1.4 } },
+          daysSince === null ? '⚠️ 尚未備份過，建議定期備份防止資料遺失。' : `⚠️ 已 ${daysSince} 天未備份，建議備份一次。`
+        ),
+        !overdue && h('div', { style: { fontSize: 11, color: '#64748b', marginBottom: 4 } },
+          `上次備份：${daysSince === 0 ? '今天' : `${daysSince} 天前`}`
+        ),
+        h('div', { style: { display: 'flex', gap: 4 } },
+          h('button', {
+            onClick: exportBackup, disabled: backupLoading,
+            style: { flex: 1, fontSize: 11.5, padding: '6px 4px', background: '#f0fdfa', color: '#0d9488', border: '1px solid #99f6e4', borderRadius: 6, cursor: backupLoading ? 'default' : 'pointer', opacity: backupLoading ? 0.6 : 1 }
+          }, backupLoading ? '處理中…' : '📤 備份資料'),
+          h('label', {
+            style: { flex: 1, fontSize: 11.5, padding: '6px 4px', background: '#f8fafc', color: '#64748b', border: '1px solid #e5e7eb', borderRadius: 6, cursor: backupLoading ? 'default' : 'pointer', textAlign: 'center', opacity: backupLoading ? 0.6 : 1, pointerEvents: backupLoading ? 'none' : 'auto' }
+          },
+            '📥 還原備份',
+            h('input', { type: 'file', accept: '.json,application/json', onChange: importBackup, style: { display: 'none' } })
+          )
+        )
+      );
+    })(),
     h('div', { style: S.userBar },
       h('div', { style: S.userInfo },
         user.photoURL && h('img', { src: user.photoURL, alt: '', style: S.avatar, referrerPolicy: 'no-referrer' }),
@@ -1186,7 +1350,7 @@ function App() {
           filtered.length === 0 && h('div', { style: S.empty }, search ? '找不到符合的筆記' : '點「新筆記」開始'),
           ...filtered.map((n) =>
             h('div', { key: n.id,
-              onClick: () => { setActiveNote(n); setMobileView('editor'); },
+              onClick: () => { saveIfDirtyRef.current?.(); setSaveStatus('idle'); setActiveNote(n); setMobileView('editor'); },
               draggable: true,
               onDragStart: (e) => { dragId.current = n.id; dragType.current = 'note'; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.style.opacity = '0.4'; },
               onDragEnd:   (e) => { e.currentTarget.style.opacity = '1'; dragId.current = null; },
@@ -1324,7 +1488,12 @@ function App() {
               )
             ),
             h('div', { style: S.editorDate },
-              h('span', null, '最後編輯 ' + fmt(activeNote.updated)),
+              h('span', { style: { color: saveStatus === 'unsaved' ? '#f59e0b' : saveStatus === 'saving' ? '#64748b' : '#9ca3af' } },
+                saveStatus === 'unsaved' ? '● 未儲存（停止輸入 2 秒後自動存）' :
+                saveStatus === 'saving'  ? '儲存中…' :
+                saveStatus === 'saved'   ? ('✓ 已自動儲存　' + fmt(activeNote.updated)) :
+                ('最後編輯 ' + fmt(activeNote.updated))
+              ),
               h('span', { style: { ...S.sizeBar, ...(sizePct > 85 ? S.sizeBarFull : {}) } },
                 `${(noteSize / 1024).toFixed(0)} KB / 1 MB (${sizePct}%)`)
             ),
