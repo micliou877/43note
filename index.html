@@ -711,8 +711,9 @@ function App() {
   const activeNoteRef  = useRef(null);
   const doAutoSaveRef  = useRef(null);
   const saveIfDirtyRef = useRef(null);
-  const swipeStart     = useRef(null);
-  const taskListRef    = useRef(null);
+  const swipeStart        = useRef(null);
+  const taskListRef       = useRef(null);
+  const scrollToBottomRef = useRef(false);
 
   useEffect(() => {
     const goOnline = () => setIsOffline(false);
@@ -780,6 +781,13 @@ function App() {
       setDbError("任務讀取被阻擋：" + err.message);
     });
   }, [user, activeProject]);
+
+  useEffect(() => {
+    if (scrollToBottomRef.current && taskListRef.current) {
+      taskListRef.current.scrollTop = taskListRef.current.scrollHeight;
+      scrollToBottomRef.current = false;
+    }
+  }, [tasks]);
 
   useEffect(() => {
     if (!user || !showTrash) { setAllDeletedNotes([]); setAllDeletedTasks([]); return; }
@@ -978,10 +986,8 @@ function App() {
         created: serverTimestamp(),
       });
       await Promise.race([addPromise, timeout]);
+      scrollToBottomRef.current = true;
       setNewTaskModal(false);
-      setTimeout(() => {
-        if (taskListRef.current) taskListRef.current.scrollTop = taskListRef.current.scrollHeight;
-      }, 300);
     } catch (err) {
       if (err.message === "連線逾時") alert("新增失敗：連線逾時！\n\n👉 請檢查 Firebase 連線狀態。");
       else alert("新增任務失敗：" + err.message);
@@ -992,6 +998,7 @@ function App() {
     await updateDoc(doc(db, `users/${user.uid}/tasks/${completeTaskId}`), {
       done: true, doneReason: reason, doneAt: serverTimestamp()
     });
+    scrollToBottomRef.current = true;
     setCompleteTaskId(null);
   };
   const uncompleteTask = async (id) => {
@@ -1173,10 +1180,12 @@ function App() {
     return getSafeTime(b.updated) - getSafeTime(a.updated);
   });
   const sortedTasks = [...visibleTasks].sort((a, b) => {
+    // 已完成永遠排最底
+    const doneOrd = (a.done ? 1 : 0) - (b.done ? 1 : 0);
+    if (doneOrd !== 0) return doneOrd;
     const ord = byOrder(a, b); if (ord !== 0) return ord;
     if (taskSort === 'name') return (a.title || '').localeCompare(b.title || '');
-    if (taskSort === 'done') return (a.done ? 1 : 0) - (b.done ? 1 : 0);
-    return getSafeTime(a.created) - getSafeTime(b.created);
+    return getSafeTime(b.created) - getSafeTime(a.created);
   });
   const filtered = sortedNotes.filter((n) => !search || (n.title || '').includes(search) || (n.body || '').includes(search));
 
