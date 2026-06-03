@@ -712,6 +712,7 @@ function App() {
   const doAutoSaveRef  = useRef(null);
   const saveIfDirtyRef = useRef(null);
   const swipeStart     = useRef(null);
+  const taskListRef    = useRef(null);
 
   useEffect(() => {
     const goOnline = () => setIsOffline(false);
@@ -978,6 +979,9 @@ function App() {
       });
       await Promise.race([addPromise, timeout]);
       setNewTaskModal(false);
+      setTimeout(() => {
+        if (taskListRef.current) taskListRef.current.scrollTop = taskListRef.current.scrollHeight;
+      }, 300);
     } catch (err) {
       if (err.message === "連線逾時") alert("新增失敗：連線逾時！\n\n👉 請檢查 Firebase 連線狀態。");
       else alert("新增任務失敗：" + err.message);
@@ -1172,7 +1176,7 @@ function App() {
     const ord = byOrder(a, b); if (ord !== 0) return ord;
     if (taskSort === 'name') return (a.title || '').localeCompare(b.title || '');
     if (taskSort === 'done') return (a.done ? 1 : 0) - (b.done ? 1 : 0);
-    return getSafeTime(b.created) - getSafeTime(a.created);
+    return getSafeTime(a.created) - getSafeTime(b.created);
   });
   const filtered = sortedNotes.filter((n) => !search || (n.title || '').includes(search) || (n.body || '').includes(search));
 
@@ -1371,7 +1375,7 @@ function App() {
           h('option', { value: 'created' }, '建立時間'),
           h('option', { value: 'name' }, '名稱 A-Z'))
       ),
-      h('div', { style: { overflowY: "auto", flex: 1 } },
+      h('div', { ref: taskListRef, style: { overflowY: "auto", flex: 1 } },
         tab === 'notes' && h('div', null,
           filtered.length === 0 && h('div', { style: S.empty }, search ? '找不到符合的筆記' : '點「新筆記」開始'),
           ...filtered.map((n) =>
