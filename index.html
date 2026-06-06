@@ -712,8 +712,11 @@ function App() {
   const doAutoSaveRef  = useRef(null);
   const saveIfDirtyRef = useRef(null);
   const swipeStart        = useRef(null);
-  const taskListRef       = useRef(null);
-  const scrollToBottomRef = useRef(false);
+  const taskListRef        = useRef(null);
+  const scrollToBottomRef  = useRef(false);
+  const bodyUndoStack      = useRef([]);
+  const bodyUndoLastPush   = useRef(0);
+  const [canBodyUndo, setCanBodyUndo] = useState(false);
 
   useEffect(() => {
     const goOnline = () => setIsOffline(false);
@@ -724,6 +727,11 @@ function App() {
   }, []);
 
   useEffect(() => { activeNoteRef.current = activeNote; }, [activeNote]);
+  useEffect(() => {
+    bodyUndoStack.current = [];
+    bodyUndoLastPush.current = 0;
+    setCanBodyUndo(false);
+  }, [activeNote?.id]);
 
   useEffect(() => {
     const onBeforeUnload = (e) => {
@@ -888,6 +896,12 @@ function App() {
       else alert("儲存失敗：" + err.message);
       throw err;
     }
+  };
+  const undoBodyEdit = () => {
+    if (!bodyUndoStack.current.length) return;
+    const prev = bodyUndoStack.current.pop();
+    setCanBodyUndo(bodyUndoStack.current.length > 0);
+    updateNoteFields({ body: prev });
   };
   const trashNote = async (id) => {
     await updateDoc(doc(db, `users/${user.uid}/notes/${id}`), { deleted: true, deletedAt: serverTimestamp() });
@@ -1512,6 +1526,7 @@ function App() {
               ),
               h('div', { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
                 h('button', { onClick: manualSaveNote, style: { ...S.primaryBtnSm, background: '#3b82f6' } }, '💾 儲存'),
+                h('button', { onClick: undoBodyEdit, disabled: !canBodyUndo, title: '上一步 (Ctrl+Z)', style: { ...S.ghostBtn, opacity: canBodyUndo ? 1 : 0.35, cursor: canBodyUndo ? 'pointer' : 'default' } }, '↩ 上一步'),
                 
                 // 👇 使用 HTML 原生 <label> 解決手機瀏覽器阻擋相簿的問題
                 h('label', { style: { ...S.ghostBtn, opacity: uploading ? 0.5 : 1, pointerEvents: uploading ? 'none' : 'auto', margin: 0 } },
@@ -1543,7 +1558,21 @@ function App() {
                 style: { position: 'absolute', top: 8, right: 8, background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 16, zIndex: 1, lineHeight: 1 }
               }, bodyExpanded ? '⊡' : '⊞'),
               h('textarea', { value: activeNote.body || '',
-                onChange: (e) => updateNoteFields({ body: e.target.value }),
+                onChange: (e) => {
+                  const now = Date.now();
+                  if (now - bodyUndoLastPush.current > 800) {
+                    const cur = activeNote.body || '';
+                    bodyUndoStack.current = [...bodyUndoStack.current, cur].slice(-50);
+                    bodyUndoLastPush.current = now;
+                    setCanBodyUndo(true);
+                  }
+                  updateNoteFields({ body: e.target.value });
+                },
+                onKeyDown: (e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+                    e.preventDefault(); undoBodyEdit();
+                  }
+                },
                 placeholder: '在這裡寫工作記事…　拍照或匯入照片後，點照片即可在上面畫圖、標註。',
                 style: { ...S.bodyArea, minHeight: bodyExpanded ? 'calc(100vh - 290px)' : 180 } })
             ),
