@@ -85,6 +85,19 @@ const fmt = (ts) => {
   const d = ts.toDate ? ts.toDate() : new Date(ts);
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
+const fmtDue = (dueDate) => {
+  if (!dueDate) return null;
+  const d = new Date(dueDate);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const tomorrow = new Date(today.getTime() + 86400000);
+  const dDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const hm = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  if (dDay < today) return { text: `逾期 ${d.getMonth()+1}/${d.getDate()} ${hm}`, color: '#dc2626', bg: '#fef2f2' };
+  if (dDay.getTime() === today.getTime()) return { text: `今天 ${hm}`, color: '#d97706', bg: '#fffbeb' };
+  if (dDay.getTime() === tomorrow.getTime()) return { text: `明天 ${hm}`, color: '#0d9488', bg: '#f0fdfa' };
+  return { text: `${d.getMonth()+1}/${d.getDate()} ${hm}`, color: '#64748b', bg: '#f8fafc' };
+};
 
 function compressImage(file) {
   return new Promise((resolve, reject) => {
@@ -308,6 +321,150 @@ function TextModal({ title, subtitle, placeholder, initial, confirmText, onConfi
         h('button', { onClick: onCancel, disabled: loading, style: S.ghostBtn }, '取消'),
         h('button', { onClick: submit, disabled: !val.trim() || loading, style: { ...S.primaryBtn, opacity: val.trim() ? 1 : 0.5 } }, loading ? '處理中…' : (confirmText || '確定'))
       )
+    )
+  );
+}
+
+function NewTaskModal({ onConfirm, onCancel }) {
+  const [title, setTitle] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const [reminderOffset, setReminderOffset] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [isComposing, setIsComposing] = useState(false);
+
+  const submit = async () => {
+    if (!title.trim() || loading) return;
+    setLoading(true);
+    try {
+      await onConfirm({ title: title.trim(), dueDate: dueDate || null, reminderOffset: reminderOffset !== '' ? parseInt(reminderOffset) : null });
+    } catch { setLoading(false); }
+  };
+
+  return h('div', { style: S.modalOverlay, onClick: e => e.target === e.currentTarget && onCancel() },
+    h('div', { style: S.modalCard },
+      h('h3', { style: S.modalTitle }, '新增任務'),
+      h('input', { autoFocus: true, value: title, onChange: e => setTitle(e.target.value),
+        onCompositionStart: () => setIsComposing(true),
+        onCompositionEnd: () => setIsComposing(false),
+        onKeyDown: e => { if (e.key === 'Enter' && !isComposing) submit(); if (e.key === 'Escape') onCancel(); },
+        placeholder: '要做什麼？例如：寄出申請書', style: { ...S.modalInput, marginBottom: 10 } }),
+      h('label', { style: { fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 } }, '截止日期 / 時間（選填）'),
+      h('input', { type: 'datetime-local', value: dueDate, onChange: e => setDueDate(e.target.value),
+        style: { ...S.modalInput, fontSize: 13 } }),
+      dueDate && h('div', { style: { marginBottom: 16 } },
+        h('label', { style: { fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 } }, '提醒'),
+        h('select', { value: reminderOffset, onChange: e => setReminderOffset(e.target.value),
+          style: { width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 10, fontSize: 13, outline: 'none', background: '#fff' } },
+          h('option', { value: '' }, '不提醒'),
+          h('option', { value: '0' }, '到時提醒'),
+          h('option', { value: '15' }, '提前 15 分鐘'),
+          h('option', { value: '30' }, '提前 30 分鐘'),
+          h('option', { value: '60' }, '提前 1 小時'),
+          h('option', { value: '1440' }, '提前 1 天')
+        )
+      ),
+      h('div', { style: S.modalActions },
+        h('button', { onClick: onCancel, disabled: loading, style: S.ghostBtn }, '取消'),
+        h('button', { onClick: submit, disabled: !title.trim() || loading, style: { ...S.primaryBtn, opacity: title.trim() ? 1 : 0.5 } }, loading ? '處理中…' : '建立')
+      )
+    )
+  );
+}
+
+function DueDateModal({ task, onSave, onCancel }) {
+  const [dueDate, setDueDate] = useState(task.dueDate || '');
+  const [reminderOffset, setReminderOffset] = useState(task.reminderOffset != null ? String(task.reminderOffset) : '');
+
+  return h('div', { style: S.modalOverlay, onClick: e => e.target === e.currentTarget && onCancel() },
+    h('div', { style: S.modalCard },
+      h('h3', { style: S.modalTitle }, '截止日期 / 提醒'),
+      h('p', { style: { ...S.modalSub, fontWeight: 500, color: '#1f2937' } }, task.title),
+      h('label', { style: { fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 } }, '截止日期 / 時間'),
+      h('input', { type: 'datetime-local', value: dueDate, onChange: e => setDueDate(e.target.value),
+        style: { ...S.modalInput, fontSize: 13 } }),
+      dueDate && h('div', { style: { marginBottom: 16 } },
+        h('label', { style: { fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 } }, '提醒'),
+        h('select', { value: reminderOffset, onChange: e => setReminderOffset(e.target.value),
+          style: { width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 10, fontSize: 13, outline: 'none', background: '#fff' } },
+          h('option', { value: '' }, '不提醒'),
+          h('option', { value: '0' }, '到時提醒'),
+          h('option', { value: '15' }, '提前 15 分鐘'),
+          h('option', { value: '30' }, '提前 30 分鐘'),
+          h('option', { value: '60' }, '提前 1 小時'),
+          h('option', { value: '1440' }, '提前 1 天')
+        )
+      ),
+      h('div', { style: S.modalActions },
+        h('button', { onClick: onCancel, style: S.ghostBtn }, '取消'),
+        dueDate && h('button', { onClick: () => onSave(null, null), style: { ...S.ghostBtn, color: '#ef4444', borderColor: '#fecaca' } }, '清除日期'),
+        h('button', { onClick: () => onSave(dueDate || null, reminderOffset !== '' ? parseInt(reminderOffset) : null), style: S.primaryBtn }, '儲存')
+      )
+    )
+  );
+}
+
+function CalendarView({ tasks, selectedDate, onSelectDate }) {
+  const today = new Date();
+  const [viewYear, setViewYear] = useState(selectedDate ? selectedDate.getFullYear() : today.getFullYear());
+  const [viewMonth, setViewMonth] = useState(selectedDate ? selectedDate.getMonth() : today.getMonth());
+
+  useEffect(() => {
+    if (selectedDate) { setViewYear(selectedDate.getFullYear()); setViewMonth(selectedDate.getMonth()); }
+  }, [selectedDate]);
+
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const firstDay = new Date(viewYear, viewMonth, 1).getDay();
+
+  const tasksByDate = {};
+  tasks.forEach(t => {
+    if (!t.dueDate || t.deleted) return;
+    const d = new Date(t.dueDate);
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    if (!tasksByDate[key]) tasksByDate[key] = [];
+    tasksByDate[key].push(t);
+  });
+
+  const prevM = () => { if (viewMonth === 0) { setViewYear(y => y-1); setViewMonth(11); } else setViewMonth(m => m-1); };
+  const nextM = () => { if (viewMonth === 11) { setViewYear(y => y+1); setViewMonth(0); } else setViewMonth(m => m+1); };
+
+  const cells = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  return h('div', { style: { padding: '10px 12px' } },
+    h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 } },
+      h('button', { onClick: prevM, style: S.miniBtn }, '‹'),
+      h('span', { style: { fontWeight: 700, fontSize: 14 } }, `${viewYear} 年 ${viewMonth + 1} 月`),
+      h('button', { onClick: nextM, style: S.miniBtn }, '›')
+    ),
+    h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, marginBottom: 2 } },
+      ...['日','一','二','三','四','五','六'].map(d =>
+        h('div', { key: d, style: { textAlign: 'center', fontSize: 10, color: '#94a3b8', padding: '3px 0' } }, d))
+    ),
+    h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1 } },
+      ...cells.map((day, i) => {
+        if (!day) return h('div', { key: `e${i}` });
+        const key = `${viewYear}-${viewMonth}-${day}`;
+        const dayTasks = tasksByDate[key] || [];
+        const pending = dayTasks.filter(t => !t.done);
+        const done = dayTasks.filter(t => t.done);
+        const isToday = day === today.getDate() && viewMonth === today.getMonth() && viewYear === today.getFullYear();
+        const isSel = selectedDate && day === selectedDate.getDate() && viewMonth === selectedDate.getMonth() && viewYear === selectedDate.getFullYear();
+        const isOverdue = pending.some(t => new Date(t.dueDate) < today);
+        return h('div', { key: day, onClick: () => onSelectDate(new Date(viewYear, viewMonth, day)),
+          style: { textAlign: 'center', padding: '4px 1px', borderRadius: 6, cursor: 'pointer', minHeight: 36,
+            background: isSel ? '#0d9488' : isToday ? '#f0fdfa' : 'transparent',
+            border: isToday && !isSel ? '1px solid #0d9488' : '1px solid transparent',
+            color: isSel ? '#fff' : '#1f2937' } },
+          h('div', { style: { fontSize: 12 } }, day),
+          dayTasks.length > 0 && h('div', { style: { display: 'flex', justifyContent: 'center', gap: 2, marginTop: 1 } },
+            pending.length > 0 && h('span', { style: { width: 5, height: 5, borderRadius: '50%', display: 'inline-block',
+              background: isOverdue ? '#ef4444' : (isSel ? '#fff' : '#0d9488') } }),
+            done.length > 0 && h('span', { style: { width: 5, height: 5, borderRadius: '50%', display: 'inline-block',
+              background: isSel ? 'rgba(255,255,255,0.5)' : '#cbd5e1' } })
+          )
+        );
+      })
     )
   );
 }
@@ -699,6 +856,8 @@ function App() {
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [saveStatus, setSaveStatus] = useState('idle'); // 'idle' | 'unsaved' | 'saving' | 'saved'
   const [backupLoading, setBackupLoading] = useState(false);
+  const [calSelectedDate, setCalSelectedDate] = useState(null);
+  const [setDueDateTask, setSetDueDateTask] = useState(null);
 
   // 👇 這是控制手機版顯示哪一個欄位的狀態
   const [mobileView, setMobileView] = useState('sidebar'); // 'sidebar' | 'list' | 'editor'
@@ -992,12 +1151,15 @@ function App() {
   };
 
   // Tasks
-  const addTask = async (title) => {
+  const addTask = async (input) => {
+    const title = typeof input === 'string' ? input : input.title;
+    const dueDate = typeof input === 'object' ? (input.dueDate || null) : null;
+    const reminderOffset = typeof input === 'object' && input.reminderOffset != null ? input.reminderOffset : null;
     try {
       const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("連線逾時")), 5000));
       const addPromise = addDoc(collection(db, `users/${user.uid}/tasks`), {
         projectId: activeProject.id, title, done: false, deleted: false, images: [], pinned: false, sortOrder: Date.now(),
-        created: serverTimestamp(),
+        created: serverTimestamp(), dueDate, reminderOffset, reminded: false,
       });
       await Promise.race([addPromise, timeout]);
       scrollToBottomRef.current = true;
@@ -1007,6 +1169,14 @@ function App() {
       else alert("新增任務失敗：" + err.message);
       throw err;
     }
+  };
+  const updateTaskDueDate = async (id, dueDate, reminderOffset) => {
+    await updateDoc(doc(db, `users/${user.uid}/tasks/${id}`), {
+      dueDate: dueDate || null,
+      reminderOffset: reminderOffset != null ? reminderOffset : null,
+      reminded: false,
+    });
+    setSetDueDateTask(null);
   };
   const completeTask = async (reason) => {
     await updateDoc(doc(db, `users/${user.uid}/tasks/${completeTaskId}`), {
@@ -1059,6 +1229,28 @@ function App() {
     await deleteDoc(doc(db, `users/${user.uid}/tasks/${id}`));
     setPermDelConfirm(null);
   };
+
+  useEffect(() => {
+    if (!user) return;
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+    const check = () => {
+      if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+      const now = Date.now();
+      tasks.forEach(t => {
+        if (t.done || t.deleted || !t.dueDate || t.reminded || t.reminderOffset == null) return;
+        const alertAt = new Date(t.dueDate).getTime() - t.reminderOffset * 60000;
+        if (now >= alertAt && now < alertAt + 120000) {
+          new Notification('任務提醒', { body: t.title, tag: t.id });
+          updateDoc(doc(db, `users/${user.uid}/tasks/${t.id}`), { reminded: true }).catch(() => {});
+        }
+      });
+    };
+    check();
+    const id = setInterval(check, 60000);
+    return () => clearInterval(id);
+  }, [tasks, user]);
 
   const BACKUP_LS_KEY = `lastBackupAt_${user?.uid || ''}`;
 
@@ -1199,6 +1391,11 @@ function App() {
     if (doneOrd !== 0) return doneOrd;
     const ord = byOrder(a, b); if (ord !== 0) return ord;
     if (taskSort === 'name') return (a.title || '').localeCompare(b.title || '');
+    if (taskSort === 'due') {
+      const aDue = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
+      const bDue = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
+      return aDue - bDue;
+    }
     return getSafeTime(b.created) - getSafeTime(a.created);
   });
   const filtered = sortedNotes.filter((n) => !search || (n.title || '').includes(search) || (n.body || '').includes(search));
@@ -1379,12 +1576,15 @@ function App() {
         ),
         tab === 'notes'
           ? h('button', { onClick: addNote, style: S.primaryBtnSm }, '+ 新筆記')
-          : h('button', { onClick: () => setNewTaskModal(true), style: S.primaryBtnSm }, '+ 新任務')
+          : tab === 'tasks'
+          ? h('button', { onClick: () => setNewTaskModal(true), style: S.primaryBtnSm }, '+ 新任務')
+          : null
       ),
       h('div', { style: S.tabBar },
         h('div', { onClick: () => setTab('notes'), style: { ...S.tab, ...(tab === 'notes' ? S.tabActive : {}) } }, `筆記 (${visibleNotes.length})`),
         h('div', { onClick: () => setTab('tasks'), style: { ...S.tab, ...(tab === 'tasks' ? S.tabActive : {}) } },
-          `任務 (${sortedTasks.filter(t => !t.done).length}/${sortedTasks.length})`)
+          `任務 (${sortedTasks.filter(t => !t.done).length}/${sortedTasks.length})`),
+        h('div', { onClick: () => setTab('calendar'), style: { ...S.tab, ...(tab === 'calendar' ? S.tabActive : {}), fontSize: 16 } }, '📅')
       ),
       
       dbError && h('div', { style: { background: '#fecaca', color: '#991b1b', padding: '10px 14px', margin: '14px 14px 0', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' } }, `⚠️ ${dbError}`),
@@ -1430,12 +1630,13 @@ function App() {
               style: { border: 'none', background: 'transparent', color: '#94a3b8', fontSize: 11, cursor: 'pointer', outline: 'none' } },
               h('option', { value: 'created' }, '建立時間'),
               h('option', { value: 'name' }, '名稱 A-Z'),
+              h('option', { value: 'due' }, '截止日期'),
               h('option', { value: 'done' }, '未完成優先'))
           ),
           sortedTasks.length === 0 && h('div', { style: S.empty }, '點「新任務」開始'),
           ...sortedTasks.map(t =>
             h('div', { key: t.id,
-              draggable: true,
+              draggable: tab === 'tasks',
               onDragStart: (e) => { dragId.current = t.id; dragType.current = 'task'; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.style.opacity = '0.4'; },
               onDragEnd:   (e) => { e.currentTarget.style.opacity = '1'; dragId.current = null; },
               onDragOver:  (e) => { e.preventDefault(); e.currentTarget.style.borderTop = '2px solid #0d9488'; },
@@ -1467,11 +1668,17 @@ function App() {
                           onClick: () => { if (!t.done) setEditingTask({ id: t.id, title: t.title }); }
                         }, t.title),
                     t.done && t.doneReason && h('div', { style: S.taskReason }, `✓ ${t.doneReason}`),
+                    t.dueDate && !t.done && (() => { const due = fmtDue(t.dueDate); return h('div', {
+                      onClick: () => setSetDueDateTask(t),
+                      style: { display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, color: due.color, background: due.bg, padding: '1px 7px', borderRadius: 10, marginTop: 4, cursor: 'pointer', border: `1px solid ${due.bg}` }
+                    }, `📅 ${due.text}`); })(),
                     h('div', { style: S.taskMeta }, t.done ? `完成於 ${fmt(t.doneAt)}` : `建立於 ${fmt(t.created)}`)
                   ),
                   h('span', { onClick: () => toggleTaskPin(t.id, t.pinned),
                     title: t.pinned ? '取消釘選' : '釘選',
                     style: { cursor: 'pointer', fontSize: 11, opacity: t.pinned ? 1 : 0.2, color: '#0d9488', flexShrink: 0 } }, '📌'),
+                  h('button', { onClick: e => { e.stopPropagation(); setSetDueDateTask(t); }, title: '設截止日期 / 提醒',
+                    style: { ...S.imgActBtn, margin: 0, flexShrink: 0, fontSize: 13, padding: '5px 7px' } }, '📅'),
                   h('label', { style: { ...S.imgActBtn, cursor: 'pointer', flexShrink: 0, margin: 0 }, title: '加照片' },
                     '📷',
                     h('input', { type: 'file', accept: 'image/*', multiple: true, onChange: (e) => onPickTaskImage(t.id, e), style: { display: 'none' } })
@@ -1497,6 +1704,33 @@ function App() {
                 )
               )
             ))
+        ),
+        tab === 'calendar' && h('div', null,
+          h(CalendarView, { tasks: visibleTasks, selectedDate: calSelectedDate, onSelectDate: setCalSelectedDate }),
+          calSelectedDate && h('div', null,
+            h('div', { style: { padding: '8px 14px 4px', borderTop: '1px solid #f1f5f9', fontSize: 13, fontWeight: 600, color: '#0f172a' } },
+              `${calSelectedDate.getMonth()+1} 月 ${calSelectedDate.getDate()} 日 的任務`),
+            (() => {
+              const dayTasks = visibleTasks.filter(t => {
+                if (!t.dueDate) return false;
+                const d = new Date(t.dueDate);
+                return d.getDate() === calSelectedDate.getDate() && d.getMonth() === calSelectedDate.getMonth() && d.getFullYear() === calSelectedDate.getFullYear();
+              });
+              return dayTasks.length === 0
+                ? h('div', { style: S.empty }, '這天沒有排程任務')
+                : h('div', null, ...dayTasks.map(t =>
+                    h('div', { key: t.id, style: { ...S.taskItem, opacity: t.done ? 0.6 : 1 } },
+                      h('div', { style: { ...S.taskCheck, ...(t.done ? S.taskCheckDone : {}), cursor: 'default', flexShrink: 0 } }, t.done ? '✓' : ''),
+                      h('div', { style: { flex: 1 } },
+                        h('div', { style: { ...S.taskTitle, ...(t.done ? S.taskTitleDone : {}) } }, t.title),
+                        h('div', { style: { fontSize: 11, color: '#94a3b8', marginTop: 2 } },
+                          new Date(t.dueDate).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false }))
+                      )
+                    )
+                  ));
+            })()
+          ),
+          !calSelectedDate && h('div', { style: { ...S.empty, marginTop: 12 } }, '點選日期查看任務')
         )
       )
     ),
@@ -1507,6 +1741,11 @@ function App() {
         ? h('div', { style: { ...S.placeholder, position: 'relative' } }, 
             h('div', { style: { fontSize: 48 } }, '📁'), h('p', null, '選擇或新增一個專案開始記錄')
           )
+        : tab === 'calendar'
+        ? h('div', { style: { ...S.placeholder, position: 'relative' } },
+            h('button', { className: 'mobile-only', onClick: () => setMobileView('list'), style: { position: 'absolute', top: 20, left: 20, background: 'none', border: 'none', fontSize: 32, padding: '0 10px', cursor: 'pointer', color: '#64748b' } }, '‹'),
+            h('div', { style: { fontSize: 48 } }, '📅'),
+            h('p', null, calSelectedDate ? `${calSelectedDate.getMonth()+1}/${calSelectedDate.getDate()} 的任務顯示在左側` : '點選左側日期查看當天任務'))
         : tab === 'tasks'
         ? h('div', { style: { ...S.placeholder, position: 'relative' } },
             h('button', { className: 'mobile-only', onClick: () => setMobileView('list'), style: { position: 'absolute', top: 20, left: 20, background: 'none', border: 'none', fontSize: 32, padding: '0 10px', cursor: 'pointer', color: '#64748b' } }, '‹'),
@@ -1600,9 +1839,11 @@ function App() {
       }) : null;
     })(),
     lightbox && h(Lightbox, { image: lightbox, onClose: () => setLightbox(null) }),
-    newTaskModal && h(TextModal, {
-      title: '新增任務', placeholder: '要做什麼？例如：寄出申請書',
-      confirmText: '建立', onConfirm: addTask, onCancel: () => setNewTaskModal(false)
+    newTaskModal && h(NewTaskModal, { onConfirm: addTask, onCancel: () => setNewTaskModal(false) }),
+    setDueDateTask && h(DueDateModal, {
+      task: setDueDateTask,
+      onSave: (dueDate, reminderOffset) => updateTaskDueDate(setDueDateTask.id, dueDate, reminderOffset),
+      onCancel: () => setSetDueDateTask(null)
     }),
     completeTaskId && h(TextModal, {
       title: '完成任務', subtitle: '記錄一下完成的方式或結果，之後可以回顧。',
