@@ -1641,7 +1641,7 @@ function App() {
     sizePct = Math.min(100, Math.round(noteSize / 10000));
   }
 
-  // 手機向左滑 → 上一頁，向右滑 → 下一頁
+  // 手機向右滑 → 上一頁，向左滑 → 下一頁
   const swipeHandlers = (view) => ({
     onTouchStart: (e) => {
       const t = e.touches[0];
@@ -1654,12 +1654,12 @@ function App() {
       const dy = t.clientY - swipeStart.current.y;
       swipeStart.current = null;
       if (Math.abs(dy) > Math.abs(dx) || Math.abs(dx) < 60) return;
-      if (dx < 0) {
-        // 向左滑 → 上一頁
+      if (dx > 0) {
+        // 向右滑 → 上一頁
         if (view === 'editor') { saveIfDirtyRef.current?.(); setMobileView('list'); }
         else if (view === 'list' || view === 'trash') setMobileView('sidebar');
       } else {
-        // 向右滑 → 下一頁
+        // 向左滑 → 下一頁
         if (view === 'sidebar' && activeProject) setMobileView('list');
         else if (view === 'list' && activeNote && tab === 'notes') setMobileView('editor');
       }
