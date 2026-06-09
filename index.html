@@ -1031,6 +1031,7 @@ function App() {
   const bodyRef            = useRef(null);
   const [canBodyUndo, setCanBodyUndo] = useState(false);
   const [fontColor, setFontColor] = useState('#111827');
+  const [copyFeedback, setCopyFeedback] = useState(false);
 
   useEffect(() => {
     const goOnline = () => setIsOffline(false);
@@ -1236,6 +1237,29 @@ function App() {
       sel.addRange(range);
     }
     updateNoteFields({ body: prev });
+  };
+  const copyNoteText = () => {
+    if (!bodyRef.current) return;
+    const toText = (node) => {
+      if (node.nodeType === 3) return node.textContent;
+      if (node.nodeType !== 1) return '';
+      const tag = node.tagName.toLowerCase();
+      if (tag === 'br') return '\n';
+      const cls = node.className || '';
+      const inner = Array.from(node.childNodes).map(toText).join('');
+      if (tag === 'div' || tag === 'p') {
+        const indent = cls.includes('li3') ? '    ' : cls.includes('li2') ? '  ' : '';
+        return indent + inner + '\n';
+      }
+      if (tag === 'ul' || tag === 'ol') return inner;
+      if (tag === 'li') return inner + '\n';
+      return inner;
+    };
+    const text = Array.from(bodyRef.current.childNodes).map(toText).join('').replace(/\n{3,}/g, '\n\n').trim();
+    navigator.clipboard.writeText(text).then(() => {
+      setCopyFeedback(true);
+      setTimeout(() => setCopyFeedback(false), 1800);
+    });
   };
   const applyListItem = (cls, prefix) => {
     const body = bodyRef.current; if (!body) return; body.focus();
@@ -1976,6 +2000,7 @@ function App() {
               ),
               h('div', { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
                 h('button', { onClick: manualSaveNote, style: { ...S.primaryBtnSm, background: '#3b82f6' } }, '💾 儲存'),
+                h('button', { onClick: copyNoteText, title: '複製全部文字內容', style: { ...S.ghostBtn, color: copyFeedback ? '#059669' : undefined } }, copyFeedback ? '✓ 已複製' : '📋 複製全文'),
                 h('button', { onClick: undoBodyEdit, disabled: !canBodyUndo, title: '上一步 (Ctrl+Z)', style: { ...S.ghostBtn, opacity: canBodyUndo ? 1 : 0.35, cursor: canBodyUndo ? 'pointer' : 'default' } }, '↩ 上一步'),
                 
                 // 👇 使用 HTML 原生 <label> 解決手機瀏覽器阻擋相簿的問題
