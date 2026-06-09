@@ -32,6 +32,9 @@
   .note-body ul, .note-body ol { padding-left: 1.5em; margin: 4px 0; }
   .note-body li { margin: 2px 0; }
   .note-body blockquote { margin: 4px 0 4px 1.5em; padding-left: 8px; border-left: 3px solid #d1d5db; color: #6b7280; }
+  .note-body .li1 { padding-left: 1.8em; text-indent: -1.8em; margin: 2px 0; }
+  .note-body .li2 { padding-left: 3.6em; text-indent: -1.8em; margin: 2px 0; }
+  .note-body .li3 { padding-left: 5.0em; text-indent: -1.3em; margin: 2px 0; }
 </style>
 </head>
 <body>
@@ -1234,6 +1237,36 @@ function App() {
     }
     updateNoteFields({ body: prev });
   };
+  const applyListItem = (cls, prefix) => {
+    const body = bodyRef.current; if (!body) return; body.focus();
+    const sel = window.getSelection();
+    if (sel.rangeCount) {
+      let n = sel.getRangeAt(0).startContainer;
+      while (n && n.parentNode !== body) n = n.parentNode;
+      if (n && n.parentNode === body && n.nodeType === 1) {
+        const isList = ['li1','li2','li3'].some(c => n.className?.split(' ').includes(c));
+        if (isList) {
+          n.className = cls;
+          const r = document.createRange(); r.selectNodeContents(n); r.collapse(false);
+          sel.removeAllRanges(); sel.addRange(r);
+          updateNoteFields({ body: body.innerHTML }); return;
+        }
+        if (n.textContent.trim() === '') {
+          n.className = cls; n.innerHTML = prefix + ' ';
+          const r = document.createRange(); r.selectNodeContents(n); r.collapse(false);
+          sel.removeAllRanges(); sel.addRange(r);
+          updateNoteFields({ body: body.innerHTML }); return;
+        }
+        const newEl = document.createElement('div');
+        newEl.className = cls; newEl.textContent = prefix + ' ';
+        n.after(newEl);
+        const r = document.createRange(); r.selectNodeContents(newEl); r.collapse(false);
+        sel.removeAllRanges(); sel.addRange(r);
+        updateNoteFields({ body: body.innerHTML }); return;
+      }
+    }
+    document.execCommand('insertHTML', false, `<div class="${cls}">${prefix} </div>`);
+  };
   const trashNote = async (id) => {
     await updateDoc(doc(db, `users/${user.uid}/notes/${id}`), { deleted: true, deletedAt: serverTimestamp() });
     if (activeNote?.id === id) { setActiveNote(null); setMobileView('list'); }
@@ -2001,7 +2034,14 @@ function App() {
                     style: S.fmtBtn, title: '編號清單' }, '1. 清單'),
                   h('div', { style: S.fmtDivider }),
                   h('button', { onMouseDown: (e) => { e.preventDefault(); document.execCommand('removeFormat'); bodyRef.current?.focus(); },
-                    style: { ...S.fmtBtn, fontSize: 11, color: '#94a3b8' }, title: '清除所有格式' }, '✕格式')
+                    style: { ...S.fmtBtn, fontSize: 11, color: '#94a3b8' }, title: '清除所有格式' }, '✕格式'),
+                  h('div', { style: S.fmtDivider }),
+                  h('button', { onMouseDown: (e) => { e.preventDefault(); applyListItem('li1', '1.'); },
+                    style: S.fmtBtn, title: '大項 1. 2. 3.　Enter自動接續，Tab換層' }, '1.大'),
+                  h('button', { onMouseDown: (e) => { e.preventDefault(); applyListItem('li2', 'a.'); },
+                    style: S.fmtBtn, title: '小項 a. b. c.' }, 'a.小'),
+                  h('button', { onMouseDown: (e) => { e.preventDefault(); applyListItem('li3', '。'); },
+                    style: S.fmtBtn, title: '細項 。' }, '。細')
                 ),
                 h('button', { onClick: () => setBodyExpanded(b => !b), title: bodyExpanded ? '縮小' : '放大文字欄',
                   style: { ...S.fmtBtn, color: '#94a3b8', fontSize: 16 } }, bodyExpanded ? '⊡' : '⊞')
@@ -2034,8 +2074,48 @@ function App() {
                   }
                 },
                 onKeyDown: (e) => {
-                  if (e.key === 'Tab') { e.preventDefault(); document.execCommand('insertHTML', false, '    '); }
-                  if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undoBodyEdit(); }
+                  if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undoBodyEdit(); return; }
+                  if (e.key !== 'Tab' && e.key !== 'Enter') return;
+                  const sel = window.getSelection();
+                  let listNode = null;
+                  if (sel.rangeCount && bodyRef.current) {
+                    let n = sel.getRangeAt(0).startContainer;
+                    while (n && n.parentNode !== bodyRef.current) n = n.parentNode;
+                    if (n && n.nodeType === 1 && ['li1','li2','li3'].some(c => n.className?.split(' ').includes(c))) listNode = n;
+                  }
+                  if (e.key === 'Tab') {
+                    e.preventDefault();
+                    if (listNode) {
+                      const levels = ['li1','li2','li3'];
+                      const idx = levels.findIndex(c => listNode.className?.split(' ').includes(c));
+                      if (!e.shiftKey && idx < 2) listNode.className = levels[idx + 1];
+                      else if (e.shiftKey && idx > 0) listNode.className = levels[idx - 1];
+                      const r = document.createRange(); r.selectNodeContents(listNode); r.collapse(false);
+                      sel.removeAllRanges(); sel.addRange(r);
+                      updateNoteFields({ body: bodyRef.current.innerHTML });
+                    } else if (!e.shiftKey) { document.execCommand('insertHTML', false, '    '); }
+                    return;
+                  }
+                  if (e.key === 'Enter' && !e.shiftKey && listNode) {
+                    e.preventDefault();
+                    const cls = ['li1','li2','li3'].find(c => listNode.className?.split(' ').includes(c));
+                    const text = listNode.textContent.trim();
+                    if ({ li1: /^\d+\.\s*$/, li2: /^[a-z]\.\s*$/, li3: /^[。]\s*$/ }[cls].test(text)) {
+                      listNode.className = ''; listNode.innerHTML = '<br>';
+                      const r = document.createRange(); r.setStart(listNode, 0); r.collapse(true);
+                      sel.removeAllRanges(); sel.addRange(r);
+                    } else {
+                      let px;
+                      if (cls === 'li1') { const m = text.match(/^(\d+)\./); px = m ? (parseInt(m[1])+1)+'.' : '1.'; }
+                      else if (cls === 'li2') { const m = text.match(/^([a-z])\./); px = (m && m[1] < 'z') ? String.fromCharCode(m[1].charCodeAt(0)+1)+'.' : 'a.'; }
+                      else px = '。';
+                      const el = document.createElement('div'); el.className = cls; el.textContent = px + ' ';
+                      listNode.after(el);
+                      const r = document.createRange(); r.selectNodeContents(el); r.collapse(false);
+                      sel.removeAllRanges(); sel.addRange(r);
+                    }
+                    updateNoteFields({ body: bodyRef.current.innerHTML }); return;
+                  }
                 },
                 style: { ...S.bodyArea, borderRadius: '0 0 10px 10px', borderTop: 'none',
                   minHeight: bodyExpanded ? 'calc(100vh - 340px)' : 150, overflow: 'auto', resize: 'none' }
