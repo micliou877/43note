@@ -686,7 +686,7 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
             onChange: (e) => setWidth(+e.target.value), style: { flex: 1 } })
         ),
         h('div', { style: { display: "flex", alignItems: "center", gap: 6 } },
-          h('button', { onClick: () => setZoom(z => Math.max(0.3, +(z-0.25).toFixed(2))), title: '縮小', style: S.toolBtn }, '−'),
+          h('button', { onClick: () => setZoom(z => Math.max(1, +(z-0.25).toFixed(2))), title: '縮小', style: S.toolBtn }, '−'),
           h('span', { style: { color: '#94a3b8', fontSize: 12, minWidth: 42, textAlign: 'center', lineHeight: '36px', userSelect: 'none' } }, `${Math.round(zoom*100)}%`),
           h('button', { onClick: () => setZoom(z => Math.min(4, +(z+0.25).toFixed(2))), title: '放大', style: S.toolBtn }, '+'),
           h('div', { style: { flex: 1 } }),
@@ -694,8 +694,8 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
           h('button', { onClick: save, style: S.primaryBtn }, '✓ 完成')
         )
       ),
-      h('div', { ref: canvasWrapRef, style: S.canvasWrap },
-        h('div', { style: { position: "relative", width: imgDims.w * zoom, ...(zoom <= 1 ? { maxWidth: "100%" } : {}) } },
+      h('div', { ref: canvasWrapRef, style: { ...S.canvasWrap, justifyContent: 'flex-start' } },
+        h('div', { style: { position: "relative", width: zoom <= 1 ? "100%" : Math.round(window.innerWidth * zoom) } },
           h('canvas', {
             ref: canvasRef, width: imgDims.w, height: imgDims.h,
             style: { width: "100%", display: "block", borderRadius: 8, touchAction: "none",
