@@ -546,12 +546,10 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
     if (!c || !imgRef.current) return;
     const ctx = c.getContext("2d");
     ctx.clearRect(0, 0, c.width, c.height);
-    if (grayscale) ctx.filter = 'grayscale(100%)';
     ctx.drawImage(imgRef.current, 0, 0, c.width, c.height);
-    ctx.filter = 'none';
     const all = cur.current ? [...strokes, cur.current] : strokes;
     for (const s of all) drawStroke(ctx, s);
-  }, [strokes, grayscale]);
+  }, [strokes]);
 
   useEffect(() => { redraw(); }, [redraw, imgDims]);
 
@@ -633,30 +631,27 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
 
   return h('div', { style: { ...S.modalOverlay, padding: 0 } },
     h('div', { style: { ...S.annotatorBox, maxWidth: '100vw', maxHeight: '100vh', width: '100vw', height: '100vh', borderRadius: 0 } },
-      h('div', { style: { background: "#0f172a", padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 } },
-        h('div', { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
-          h('div', { style: { display: "flex", gap: 5 } },
-            ...tools.map((t) =>
-              h('button', { key: t.id, onClick: () => setTool(t.id), title: t.label,
-                style: { ...S.toolBtn, ...(tool === t.id ? S.toolBtnActive : {}) } }, t.icon)),
-            h('button', { onClick: undo, title: "復原", style: S.toolBtn }, '⟲'),
-            h('button', { onClick: () => setGrayscale(g => !g), title: "黑白底圖",
-              style: { ...S.toolBtn, ...(grayscale ? S.toolBtnActive : {}) } }, '◐')
-          ),
-          h('div', { style: { display: "flex", alignItems: "center", gap: 4 } },
-            h('button', { onClick: () => setZoom(z => Math.max(0.3, +(z - 0.25).toFixed(2))), title: '縮小', style: S.toolBtn }, '−'),
-            h('span', { style: { color: '#94a3b8', fontSize: 11, minWidth: 36, textAlign: 'center', userSelect: 'none' } }, `${Math.round(zoom * 100)}%`),
-            h('button', { onClick: () => setZoom(z => Math.min(4, +(z + 0.25).toFixed(2))), title: '放大', style: S.toolBtn }, '+')
-          )
+      h('div', { style: { background: "#0f172a", padding: "8px 10px", display: "flex", flexDirection: "column", gap: 7, flexShrink: 0 } },
+        h('div', { style: { display: "flex", gap: 5 } },
+          ...tools.map((t) =>
+            h('button', { key: t.id, onClick: () => setTool(t.id), title: t.label,
+              style: { ...S.toolBtn, ...(tool === t.id ? S.toolBtnActive : {}) } }, t.icon)),
+          h('button', { onClick: undo, title: "復原", style: S.toolBtn }, '⟲'),
+          h('button', { onClick: () => setGrayscale(g => !g), title: "黑白底圖",
+            style: { ...S.toolBtn, ...(grayscale ? S.toolBtnActive : {}) } }, '◐')
         ),
-        h('div', { style: { display: "flex", alignItems: "center", gap: 8 } },
-          h('div', { style: { display: "flex", gap: 5, flex: 1, alignItems: 'center' } },
-            ...COLORS.map((c) =>
-              h('button', { key: c, onClick: () => setColor(c),
-                style: { ...S.swatch, background: c, outline: color === c ? "2px solid #fff" : "1px solid #475569", outlineOffset: 2 } })),
-            h('input', { type: "range", min: 2, max: 14, value: width,
-              onChange: (e) => setWidth(+e.target.value), style: { flex: 1, maxWidth: 90 } })
-          ),
+        h('div', { style: { display: "flex", alignItems: "center", gap: 6 } },
+          ...COLORS.map((c) =>
+            h('button', { key: c, onClick: () => setColor(c),
+              style: { ...S.swatch, background: c, outline: color === c ? "2px solid #fff" : "1px solid #475569", outlineOffset: 2 } })),
+          h('input', { type: "range", min: 2, max: 14, value: width,
+            onChange: (e) => setWidth(+e.target.value), style: { flex: 1 } })
+        ),
+        h('div', { style: { display: "flex", alignItems: "center", gap: 6 } },
+          h('button', { onClick: () => setZoom(z => Math.max(0.3, +(z-0.25).toFixed(2))), title: '縮小', style: S.toolBtn }, '−'),
+          h('span', { style: { color: '#94a3b8', fontSize: 12, minWidth: 42, textAlign: 'center', lineHeight: '36px', userSelect: 'none' } }, `${Math.round(zoom*100)}%`),
+          h('button', { onClick: () => setZoom(z => Math.min(4, +(z+0.25).toFixed(2))), title: '放大', style: S.toolBtn }, '+'),
+          h('div', { style: { flex: 1 } }),
           h('button', { onClick: onClose, style: S.ghostBtn }, '取消'),
           h('button', { onClick: save, style: S.primaryBtn }, '✓ 完成')
         )
@@ -665,7 +660,9 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
         h('div', { style: { position: "relative", width: imgDims.w * zoom, ...(zoom <= 1 ? { maxWidth: "100%" } : {}) } },
           h('canvas', {
             ref: canvasRef, width: imgDims.w, height: imgDims.h,
-            style: { width: "100%", display: "block", borderRadius: 8, touchAction: "none", cursor: tool === "text" ? "text" : "crosshair" },
+            style: { width: "100%", display: "block", borderRadius: 8, touchAction: "none",
+              cursor: tool === "text" ? "text" : "crosshair",
+              filter: grayscale ? 'grayscale(1)' : 'none' },
             onMouseDown: start, onMouseMove: move, onMouseUp: end, onMouseLeave: end,
             onTouchStart: start, onTouchMove: move, onTouchEnd: end
           }),
