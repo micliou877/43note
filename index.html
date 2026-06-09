@@ -500,6 +500,63 @@ function CalendarView({ tasks, selectedDate, onSelectDate }) {
   );
 }
 
+function renderStrokesScaled(ctx, strokes, ratio) {
+  for (const s of (strokes || [])) {
+    if (!s || !s.color) continue;
+    ctx.strokeStyle = s.color; ctx.fillStyle = s.color;
+    ctx.lineWidth = s.width * ratio; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    if (s.type === 'pen') {
+      ctx.beginPath();
+      s.points.forEach((p, i) => (i ? ctx.lineTo(p.x * ratio, p.y * ratio) : ctx.moveTo(p.x * ratio, p.y * ratio)));
+      ctx.stroke();
+    } else if (s.type === 'rect') {
+      ctx.strokeRect(s.x0 * ratio, s.y0 * ratio, (s.x1 - s.x0) * ratio, (s.y1 - s.y0) * ratio);
+    } else if (s.type === 'arrow') {
+      const x0 = s.x0*ratio, y0 = s.y0*ratio, x1 = s.x1*ratio, y1 = s.y1*ratio;
+      const head = (10 + s.width * 2) * ratio;
+      const ang = Math.atan2(y1 - y0, x1 - x0);
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x1, y1);
+      ctx.lineTo(x1 - head * Math.cos(ang - Math.PI/6), y1 - head * Math.sin(ang - Math.PI/6));
+      ctx.lineTo(x1 - head * Math.cos(ang + Math.PI/6), y1 - head * Math.sin(ang + Math.PI/6));
+      ctx.closePath(); ctx.fill();
+    } else if (s.type === 'text') {
+      ctx.font = `${s.size * ratio}px -apple-system,"PingFang TC",sans-serif`;
+      ctx.textBaseline = 'top';
+      ctx.fillText(s.text, s.x * ratio, s.y * ratio);
+    }
+  }
+}
+
+function renderImageToDataUrl(im) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const maxW = 1200;
+      const scale = Math.min(1, maxW / img.width);
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const ctx = c.getContext('2d');
+      if (im.grayscale) {
+        ctx.filter = 'grayscale(100%)';
+        ctx.drawImage(img, 0, 0, w, h);
+        ctx.filter = 'none';
+      } else {
+        ctx.drawImage(img, 0, 0, w, h);
+      }
+      if (im.strokes?.length) {
+        const annotatorScale = Math.min(1, 1400 / img.width);
+        const ratio = w / (img.width * annotatorScale);
+        renderStrokesScaled(ctx, im.strokes, ratio);
+      }
+      resolve(c.toDataURL('image/jpeg', 0.85));
+    };
+    img.src = im.dataUrl;
+  });
+}
+
 function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose }) {
   const canvasRef = useRef(null);
   const imgRef = useRef(null);
@@ -1289,6 +1346,45 @@ function App() {
       setTimeout(() => setCopyFeedback(false), 1800);
     });
   };
+  const exportToPDF = async () => {
+    if (!activeNote) return;
+    const title = activeNote.title || '未命名筆記';
+    const bodyHtml = bodyRef.current?.innerHTML || '';
+    const dateStr = activeNote.updated?.toDate
+      ? activeNote.updated.toDate().toLocaleString('zh-TW') : '';
+    const esc = (s) => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const imgUrls = await Promise.all(noteImages.map(renderImageToDataUrl));
+    const imagesHtml = imgUrls.map(url =>
+      `<div class="photo"><img src="${url}"></div>`
+    ).join('');
+    const html = `<!DOCTYPE html><html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(title)}</title>
+<style>
+body{font-family:-apple-system,"PingFang TC","Noto Sans TC",sans-serif;max-width:780px;margin:32px auto;padding:0 24px;color:#1f2937;line-height:1.75}
+h1{font-size:22px;margin:0 0 4px}
+.date{font-size:12px;color:#94a3b8;margin-bottom:20px}
+.body{font-size:14.5px}
+.li1{margin:3px 0}.li2{padding-left:2em;margin:3px 0}.li3{padding-left:4em;margin:3px 0}
+ul,ol{padding-left:1.5em;margin:4px 0}li{margin:2px 0}
+blockquote{margin:4px 0 4px 1.5em;padding-left:8px;border-left:3px solid #d1d5db;color:#6b7280}
+.photos{margin-top:20px;display:flex;flex-direction:column;gap:14px}
+.photo img{max-width:100%;border-radius:8px;display:block}
+@media print{body{margin:0}}
+</style></head><body>
+<h1>${esc(title)}</h1>
+${dateStr ? `<p class="date">${dateStr}</p>` : ''}
+<div class="body">${bodyHtml}</div>
+${imgUrls.length ? `<div class="photos">${imagesHtml}</div>` : ''}
+<script>window.onload=function(){window.print();}<\/script>
+</body></html>`;
+    const win = window.open('', '_blank');
+    if (!win) { alert('請先允許彈出視窗'); return; }
+    win.document.write(html);
+    win.document.close();
+  };
+
   const applyListItem = (cls, prefix) => {
     const body = bodyRef.current; if (!body) return; body.focus();
     const sel = window.getSelection();
@@ -2043,6 +2139,7 @@ function App() {
               h('div', { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
                 h('button', { onClick: manualSaveNote, style: { ...S.primaryBtnSm, background: '#3b82f6' } }, '💾 儲存'),
                 h('button', { onClick: copyNoteText, title: '複製全部文字內容', style: { ...S.ghostBtn, color: copyFeedback ? '#059669' : undefined } }, copyFeedback ? '✓ 已複製' : '📋 複製全文'),
+                h('button', { onClick: exportToPDF, title: '匯出為 PDF', style: S.ghostBtn }, '📄 匯出 PDF'),
                 h('button', { onClick: undoBodyEdit, disabled: !canBodyUndo, title: '上一步 (Ctrl+Z)', style: { ...S.ghostBtn, opacity: canBodyUndo ? 1 : 0.35, cursor: canBodyUndo ? 'pointer' : 'default' } }, '↩ 上一步'),
                 
                 // 👇 使用 HTML 原生 <label> 解決手機瀏覽器阻擋相簿的問題
