@@ -57,7 +57,7 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import { createRoot } from "react-dom/client";
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore, collection, query, orderBy, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, serverTimestamp, writeBatch, getDocs } from "firebase/firestore";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore, collection, query, orderBy, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, serverTimestamp, writeBatch, getDocs, deleteField } from "firebase/firestore";
 
 // ════════════════════════════════════════════════════════════════
 const firebaseConfig = {
@@ -1032,6 +1032,7 @@ function App() {
   const [canBodyUndo, setCanBodyUndo] = useState(false);
   const [fontColor, setFontColor] = useState('#111827');
   const [copyFeedback, setCopyFeedback] = useState(false);
+  const [noteImages, setNoteImages] = useState([]);
 
   useEffect(() => {
     const goOnline = () => setIsOffline(false);
@@ -1047,6 +1048,29 @@ function App() {
     bodyUndoLastPush.current = 0;
     setCanBodyUndo(false);
     if (bodyRef.current) bodyRef.current.innerHTML = toBodyHtml(activeNote?.body || '');
+  }, [activeNote?.id]);
+
+  // 訂閱目前筆記的圖片 subcollection
+  useEffect(() => {
+    if (!user || !activeNote?.id) { setNoteImages([]); return; }
+    const q = query(collection(db, `users/${user.uid}/notes/${activeNote.id}/images`), orderBy('sortOrder', 'asc'));
+    return onSnapshot(q, snap => setNoteImages(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+  }, [user, activeNote?.id]);
+
+  // 自動遷移舊格式（images 陣列 → subcollection）
+  useEffect(() => {
+    if (!user || !activeNote?.id || !activeNote.images?.length) return;
+    const migrate = async () => {
+      const batch = writeBatch(db);
+      activeNote.images.forEach((im, i) => {
+        const ref = doc(collection(db, `users/${user.uid}/notes/${activeNote.id}/images`));
+        batch.set(ref, { dataUrl: im.dataUrl, strokes: im.strokes || [], grayscale: im.grayscale || false, sortOrder: i, created: serverTimestamp() });
+      });
+      batch.update(doc(db, `users/${user.uid}/notes/${activeNote.id}`), { images: deleteField(), imageCount: activeNote.images.length });
+      await batch.commit();
+      updateNoteFields({ images: undefined, imageCount: activeNote.images.length });
+    };
+    migrate().catch(err => console.error('遷移圖片失敗', err));
   }, [activeNote?.id]);
 
   useEffect(() => {
@@ -1159,7 +1183,11 @@ function App() {
   const permDelProject = async (id) => {
     const batch = writeBatch(db);
     const ns = await getDocs(query(collection(db, `users/${user.uid}/notes`), where("projectId", "==", id)));
-    ns.docs.forEach(d => batch.delete(d.ref));
+    for (const nd of ns.docs) {
+      const imgs = await getDocs(collection(db, `users/${user.uid}/notes/${nd.id}/images`));
+      imgs.docs.forEach(d => batch.delete(d.ref));
+      batch.delete(nd.ref);
+    }
     const ts = await getDocs(query(collection(db, `users/${user.uid}/tasks`), where("projectId", "==", id)));
     ts.docs.forEach(d => batch.delete(d.ref));
     batch.delete(doc(db, `users/${user.uid}/projects/${id}`));
@@ -1303,24 +1331,22 @@ function App() {
     await deleteDoc(doc(db, `users/${user.uid}/notes/${id}`));
     setPermDelConfirm(null);
   };
+  const imgCol = () => collection(db, `users/${user.uid}/notes/${activeNote.id}/images`);
+  const imgDoc = (imgId) => doc(db, `users/${user.uid}/notes/${activeNote.id}/images/${imgId}`);
   const onPickImage = async (e) => {
     const files = Array.from(e.target.files || []);
     e.target.value = "";
     if (!files.length || !activeNote) return;
     setUploading(true);
     try {
-      const newImages = [...(activeNote.images || [])];
       for (const f of files) {
         const dataUrl = await compressImage(f);
-        newImages.push({ id: uid(), dataUrl, strokes: [], grayscale: false });
+        await addDoc(imgCol(), { dataUrl, strokes: [], grayscale: false, sortOrder: Date.now(), created: serverTimestamp() });
       }
-      const fakeNote = { ...activeNote, images: newImages };
-      if (estimateNoteSize(fakeNote) > 950000) {
-        alert("加入這些照片後筆記會超過 1MB 上限。請刪除舊照片或新建一個筆記再加。");
-        return;
-      }
-      await updateNoteNow({ images: newImages });
-    } catch (err) { }
+      const newCount = noteImages.length + files.length;
+      await updateDoc(doc(db, `users/${user.uid}/notes/${activeNote.id}`), { imageCount: newCount, updated: serverTimestamp() });
+      updateNoteFields({ imageCount: newCount });
+    } catch (err) { alert('加入照片失敗：' + err.message); }
     finally { setUploading(false); }
   };
   const saveAnnotation = async ({ strokes, grayscale }) => {
@@ -1329,23 +1355,24 @@ function App() {
       const imgs = task.images.map((im, i) => i === annotating.imgIndex ? { ...im, strokes, grayscale } : im);
       await updateDoc(doc(db, `users/${user.uid}/tasks/${annotating.id}`), { images: imgs });
     } else {
-      const imgs = activeNote.images.map((im, i) => i === annotating.imgIndex ? { ...im, strokes, grayscale } : im);
-      await updateNoteNow({ images: imgs });
+      const img = noteImages[annotating.imgIndex];
+      if (img) await updateDoc(imgDoc(img.id), { strokes, grayscale });
     }
     setAnnotating(null);
   };
-  const delImage = async (i) => {
-    await updateNoteNow({ images: activeNote.images.filter((_, idx) => idx !== i) });
+  const delImage = async (imgId) => {
+    await deleteDoc(imgDoc(imgId));
+    const newCount = Math.max(0, (activeNote.imageCount || noteImages.length) - 1);
+    await updateDoc(doc(db, `users/${user.uid}/notes/${activeNote.id}`), { imageCount: newCount });
+    updateNoteFields({ imageCount: newCount });
     setConfirmDel(null);
   };
-  const rotateImage = async (imgIndex, deg) => {
-    if (!activeNote) return;
+  const rotateImage = async (imgId, deg) => {
+    const img = noteImages.find(im => im.id === imgId);
+    if (!img) return;
     try {
-      const newDataUrl = await rotateImageData(activeNote.images[imgIndex].dataUrl, deg);
-      const newImages = activeNote.images.map((im, i) =>
-        i === imgIndex ? { ...im, dataUrl: newDataUrl, strokes: [] } : im
-      );
-      await updateNoteNow({ images: newImages });
+      const newDataUrl = await rotateImageData(img.dataUrl, deg);
+      await updateDoc(imgDoc(imgId), { dataUrl: newDataUrl, strokes: [] });
     } catch (err) { alert('旋轉失敗：' + err.message); }
   };
 
@@ -1491,12 +1518,16 @@ function App() {
         getDocs(collection(db, `users/${user.uid}/notes`)),
         getDocs(collection(db, `users/${user.uid}/tasks`)),
       ]);
+      const notesWithImgs = await Promise.all(noteSnap.docs.map(async d => {
+        const imgSnap = await getDocs(collection(db, `users/${user.uid}/notes/${d.id}/images`));
+        return { id: d.id, ...d.data(), _images: imgSnap.docs.map(im => ({ id: im.id, ...im.data() })) };
+      }));
       const data = {
-        version: 1,
+        version: 2,
         exportedAt: new Date().toISOString(),
         uid: user.uid,
         projects: projSnap.docs.map(d => ({ id: d.id, ...d.data() })),
-        notes:    noteSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+        notes:    notesWithImgs,
         tasks:    taskSnap.docs.map(d => ({ id: d.id, ...d.data() })),
       };
       const json = JSON.stringify(data, (_, v) =>
@@ -1539,9 +1570,10 @@ function App() {
       const existP = new Set(ep.docs.map(d => d.id));
       const existN = new Set(en.docs.map(d => d.id));
       const existT = new Set(et.docs.map(d => d.id));
+      const newNotes = (data.notes||[]).filter(n => !existN.has(n.id));
       const items = [
         ...(data.projects||[]).filter(p => !existP.has(p.id)).map(p => ({ col: 'projects', ...p })),
-        ...(data.notes||[]).filter(n => !existN.has(n.id)).map(n => ({ col: 'notes', ...n })),
+        ...newNotes.map(({ _images, ...n }) => ({ col: 'notes', ...n })),
         ...(data.tasks||[]).filter(t => !existT.has(t.id)).map(t => ({ col: 'tasks', ...t })),
       ];
       if (items.length === 0) { alert('備份中的所有資料在目前帳號已存在，無需還原。'); setBackupLoading(false); return; }
@@ -1550,6 +1582,16 @@ function App() {
         items.slice(i, i + 400).forEach(({ col, id, ...fields }) =>
           batch.set(doc(db, `users/${user.uid}/${col}/${id}`), fields));
         await batch.commit();
+      }
+      // 還原圖片 subcollection
+      for (const n of newNotes) {
+        if (!n._images?.length) continue;
+        for (let i = 0; i < n._images.length; i += 400) {
+          const batch = writeBatch(db);
+          n._images.slice(i, i + 400).forEach(({ id: imgId, ...imgFields }) =>
+            batch.set(doc(db, `users/${user.uid}/notes/${n.id}/images/${imgId}`), imgFields));
+          await batch.commit();
+        }
       }
       alert(`✅ 還原完成！共新增 ${items.length} 筆資料。`);
     } catch (err) { alert('還原失敗：' + err.message); }
@@ -1770,7 +1812,7 @@ function App() {
           h('h3', { style: { marginTop: 24, fontSize: 14, color: '#64748b' } }, `已刪除筆記 (${allDeletedNotes.length})`),
           ...allDeletedNotes.map(n => h('div', { key: n.id, style: S.trashItem },
             h('div', { style: S.trashItemName }, `📝 ${n.title || '未命名筆記'}`),
-            h('div', { style: S.trashItemMeta }, `刪除於 ${fmt(n.deletedAt)}　${(n.images?.length || 0)} 張照片`),
+            h('div', { style: S.trashItemMeta }, `刪除於 ${fmt(n.deletedAt)}　${(n.imageCount || n.images?.length || 0)} 張照片`),
             h('div', { style: S.trashItemActions },
               h('button', { onClick: () => restoreNote(n.id), style: S.miniLink }, '↻ 還原'),
               permDelConfirm?.type === 'note' && permDelConfirm.id === n.id
@@ -1853,7 +1895,7 @@ function App() {
                 h('span', { onClick: (e) => { e.stopPropagation(); toggleNotePin(n.id, n.pinned); },
                   title: n.pinned ? '取消釘選' : '釘選',
                   style: { cursor: 'pointer', fontSize: 11, opacity: n.pinned ? 1 : 0.2, color: '#0d9488', flexShrink: 0 } }, '📌'),
-                (n.images?.length > 0) && h('span', { style: S.imgBadge }, `📷 ${n.images.length}`)),
+                ((n.imageCount || n.images?.length || 0) > 0) && h('span', { style: S.imgBadge }, `📷 ${n.imageCount || n.images?.length}`)),
               h('div', { style: S.notePreview }, stripHtml(n.body) || '（無內容）'),
               h('div', { style: S.noteDate }, fmt(n.updated))
             ))
@@ -2146,16 +2188,16 @@ function App() {
                   minHeight: bodyExpanded ? 'calc(100vh - 340px)' : 150, overflow: 'auto', resize: 'none' }
               })
             ),
-            (activeNote.images?.length > 0) && h('div', { style: S.imgGrid },
-              ...activeNote.images.map((im, i) =>
+            (noteImages.length > 0) && h('div', { style: S.imgGrid },
+              ...noteImages.map((im, i) =>
                 h(ImageCard, { key: im.id, image: im, index: i,
                   onView: () => setLightbox(im),
                   onAnnotate: () => setAnnotating({ type: 'note', imgIndex: i }),
-                  onDelete: () => setConfirmDel({ type: "image", id: i }),
-                  confirmingDelete: confirmDel?.type === "image" && confirmDel.id === i,
-                  onConfirmDelete: () => delImage(i),
-                  onRotateLeft: () => rotateImage(i, 270),
-                  onRotateRight: () => rotateImage(i, 90),
+                  onDelete: () => setConfirmDel({ type: "image", id: im.id }),
+                  confirmingDelete: confirmDel?.type === "image" && confirmDel.id === im.id,
+                  onConfirmDelete: () => delImage(im.id),
+                  onRotateLeft: () => rotateImage(im.id, 270),
+                  onRotateRight: () => rotateImage(im.id, 90),
                 })))
           )
     ),
