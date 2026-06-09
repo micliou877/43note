@@ -253,7 +253,7 @@ const S = {
   fmtDivider: { width: 1, height: 18, background: '#d1d5db', margin: '0 3px', flexShrink: 0 },
 };
 
-function Login() {
+function Login({ blockedMsg = '' }) {
   const [email, setEmail] = useState('');
   const [pwd, setPwd] = useState('');
   const [isSignup, setIsSignup] = useState(false);
@@ -314,6 +314,7 @@ function Login() {
         h('input', { type: 'password', placeholder: '密碼 (至少 6 字)', value: pwd, onChange: e => setPwd(e.target.value), required: true, minLength: 6, style: L.input }),
         h('button', { type: 'submit', disabled: loading, style: L.primaryBtn }, loading ? '處理中…' : (isSignup ? '建立帳號' : '登入'))),
       h('button', { onClick: () => setIsSignup(!isSignup), style: L.linkBtn }, isSignup ? '已有帳號？登入' : '沒有帳號？建立新帳號'),
+      blockedMsg && h('div', { style: { ...L.err, background: '#fef3c7', color: '#78350f', borderLeft: '3px solid #f59e0b' } }, blockedMsg),
       err && h('div', { style: L.err }, err)
     )
   );
@@ -982,6 +983,7 @@ function NewProjectInput({ onConfirm, onCancel }) {
 function App() {
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
+  const [blockedMsg, setBlockedMsg] = useState('');
   const [projects, setProjects] = useState([]);
   const [notes, setNotes] = useState([]);
   const [tasks, setTasks] = useState([]);
@@ -1091,7 +1093,18 @@ function App() {
 
   useEffect(() => {
     getRedirectResult(auth).catch(e => console.error("登入回傳:", e));
-    const unsub = onAuthStateChanged(auth, (u) => { setUser(u); setAuthReady(true); });
+    const ALLOWED = ['micliou877@gmail.com'];
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      if (u && !ALLOWED.includes(u.email)) {
+        await signOut(auth);
+        setBlockedMsg('此系統為個人使用，不開放其他帳號登入。');
+        setAuthReady(true);
+        return;
+      }
+      setBlockedMsg('');
+      setUser(u);
+      setAuthReady(true);
+    });
     return unsub;
   }, []);
 
@@ -1629,7 +1642,7 @@ function App() {
   };
 
   if (!authReady) return h('div', { style: { ...S.app, alignItems: 'center', justifyContent: 'center' } }, '載入中…');
-  if (!user) return h(Login);
+  if (!user) return h(Login, { blockedMsg });
 
   const offlineBanner = isOffline && h('div', {
     style: { position: 'fixed', top: 0, left: 0, right: 0, background: '#fef3c7', color: '#92400e', padding: '6px 14px', fontSize: 12.5, textAlign: 'center', zIndex: 300, borderBottom: '1px solid #fde68a' }
