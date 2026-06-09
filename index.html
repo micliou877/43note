@@ -987,6 +987,7 @@ function App() {
     bodyUndoStack.current = [];
     bodyUndoLastPush.current = 0;
     setCanBodyUndo(false);
+    if (bodyRef.current) bodyRef.current.innerHTML = toBodyHtml(activeNote?.body || '');
   }, [activeNote?.id]);
 
   useEffect(() => {
@@ -1164,8 +1165,19 @@ function App() {
     }
   };
   const undoBodyEdit = () => {
-    bodyRef.current?.focus();
-    document.execCommand('undo');
+    if (!bodyUndoStack.current.length) return;
+    const prev = bodyUndoStack.current.pop();
+    setCanBodyUndo(bodyUndoStack.current.length > 0);
+    if (bodyRef.current) {
+      bodyRef.current.innerHTML = prev;
+      const range = document.createRange();
+      const sel = window.getSelection();
+      range.selectNodeContents(bodyRef.current);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    updateNoteFields({ body: prev });
   };
   const trashNote = async (id) => {
     await updateDoc(doc(db, `users/${user.uid}/notes/${id}`), { deleted: true, deletedAt: serverTimestamp() });
@@ -1876,7 +1888,7 @@ function App() {
               ),
               h('div', { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
                 h('button', { onClick: manualSaveNote, style: { ...S.primaryBtnSm, background: '#3b82f6' } }, '💾 儲存'),
-                h('button', { onClick: undoBodyEdit, title: '上一步 (Ctrl+Z)', style: S.ghostBtn }, '↩ 上一步'),
+                h('button', { onClick: undoBodyEdit, disabled: !canBodyUndo, title: '上一步 (Ctrl+Z)', style: { ...S.ghostBtn, opacity: canBodyUndo ? 1 : 0.35, cursor: canBodyUndo ? 'pointer' : 'default' } }, '↩ 上一步'),
                 
                 // 👇 使用 HTML 原生 <label> 解決手機瀏覽器阻擋相簿的問題
                 h('label', { style: { ...S.ghostBtn, opacity: uploading ? 0.5 : 1, pointerEvents: uploading ? 'none' : 'auto', margin: 0 } },
@@ -1940,21 +1952,25 @@ function App() {
                   style: { ...S.fmtBtn, color: '#94a3b8', fontSize: 16 } }, bodyExpanded ? '⊡' : '⊞')
               ),
               h('div', {
-                key: activeNote.id,
                 ref: bodyRef,
                 contentEditable: true,
                 suppressContentEditableWarning: true,
-                dangerouslySetInnerHTML: { __html: toBodyHtml(activeNote.body || '') },
                 'data-placeholder': '在這裡寫工作記事…　拍照或匯入照片後，點照片即可在上面畫圖、標註。',
                 className: 'note-body',
                 onInput: () => {
                   const html = bodyRef.current?.innerHTML || '';
                   if (html === '<br>') bodyRef.current.innerHTML = '';
+                  const now = Date.now();
+                  if (now - bodyUndoLastPush.current > 800) {
+                    bodyUndoStack.current = [...bodyUndoStack.current, activeNote.body || ''].slice(-50);
+                    bodyUndoLastPush.current = now;
+                    setCanBodyUndo(true);
+                  }
                   updateNoteFields({ body: bodyRef.current?.innerHTML || '' });
-                  setCanBodyUndo(true);
                 },
                 onKeyDown: (e) => {
                   if (e.key === 'Tab') { e.preventDefault(); document.execCommand('insertHTML', false, '    '); }
+                  if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undoBodyEdit(); }
                 },
                 style: { ...S.bodyArea, borderRadius: '0 0 10px 10px', borderTop: 'none',
                   minHeight: bodyExpanded ? 'calc(100vh - 340px)' : 150, overflow: 'auto', resize: 'none' }
