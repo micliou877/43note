@@ -116,7 +116,13 @@ function compressImage(file) {
         const canvas = document.createElement('canvas');
         canvas.width = w; canvas.height = hh;
         canvas.getContext('2d').drawImage(img, 0, 0, w, hh);
-        resolve(canvas.toDataURL('image/jpeg', JPG_QUALITY));
+        let q = JPG_QUALITY;
+        let dataUrl;
+        do {
+          dataUrl = canvas.toDataURL('image/jpeg', q);
+          q = Math.round((q - 0.1) * 10) / 10;
+        } while (dataUrl.length > 600000 && q >= 0.2);
+        resolve(dataUrl);
       };
       img.onerror = () => reject(new Error('圖片解析失敗'));
       img.src = e.target.result;
@@ -2016,6 +2022,16 @@ function App() {
                     setCanBodyUndo(true);
                   }
                   updateNoteFields({ body: bodyRef.current?.innerHTML || '' });
+                },
+                onPaste: (e) => {
+                  const items = Array.from(e.clipboardData?.items || []);
+                  if (items.some(it => it.type.startsWith('image/'))) { e.preventDefault(); return; }
+                  const ph = e.clipboardData?.getData('text/html') || '';
+                  if (/<img\b/i.test(ph)) {
+                    e.preventDefault();
+                    const pt = e.clipboardData?.getData('text/plain') || '';
+                    if (pt) document.execCommand('insertText', false, pt);
+                  }
                 },
                 onKeyDown: (e) => {
                   if (e.key === 'Tab') { e.preventDefault(); document.execCommand('insertHTML', false, '    '); }
