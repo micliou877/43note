@@ -145,6 +145,20 @@ function rotateImageData(dataUrl, deg) {
   });
 }
 
+function toBodyHtml(body) {
+  if (!body) return '';
+  if (/<(br|p|div|b|i|u|s|span|ul|ol|li|strong|em|blockquote)\b/i.test(body)) return body;
+  return body
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>');
+}
+
+function stripHtml(html) {
+  if (!html) return '';
+  return html.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').trim();
+}
+
 function estimateNoteSize(note) {
   let bytes = (note.title?.length || 0) + (note.body?.length || 0);
   for (const im of (note.images || [])) {
@@ -1495,7 +1509,7 @@ function App() {
     }
     return getSafeTime(b.created) - getSafeTime(a.created);
   });
-  const filtered = sortedNotes.filter((n) => !search || (n.title || '').includes(search) || (n.body || '').includes(search));
+  const filtered = sortedNotes.filter((n) => !search || (n.title || '').includes(search) || stripHtml(n.body || '').includes(search));
 
   let noteSize = 0, sizePct = 0;
   if (activeNote) {
@@ -1716,7 +1730,7 @@ function App() {
                   title: n.pinned ? '取消釘選' : '釘選',
                   style: { cursor: 'pointer', fontSize: 11, opacity: n.pinned ? 1 : 0.2, color: '#0d9488', flexShrink: 0 } }, '📌'),
                 (n.images?.length > 0) && h('span', { style: S.imgBadge }, `📷 ${n.images.length}`)),
-              h('div', { style: S.notePreview }, n.body || '（無內容）'),
+              h('div', { style: S.notePreview }, stripHtml(n.body) || '（無內容）'),
               h('div', { style: S.noteDate }, fmt(n.updated))
             ))
         ),
@@ -1930,7 +1944,7 @@ function App() {
                 ref: bodyRef,
                 contentEditable: true,
                 suppressContentEditableWarning: true,
-                dangerouslySetInnerHTML: { __html: activeNote.body || '' },
+                dangerouslySetInnerHTML: { __html: toBodyHtml(activeNote.body || '') },
                 'data-placeholder': '在這裡寫工作記事…　拍照或匯入照片後，點照片即可在上面畫圖、標註。',
                 className: 'note-body',
                 onInput: () => {
