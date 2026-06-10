@@ -37,6 +37,8 @@
   .note-body ul, .note-body ol { padding-left: 1.5em; margin: 4px 0; }
   .note-body li { margin: 2px 0; }
   .note-body blockquote { margin: 4px 0 4px 1.5em; padding-left: 8px; border-left: 3px solid #d1d5db; color: #6b7280; }
+  .note-body img[data-inline] { max-width: 100%; border-radius: 6px; cursor: pointer; display: block; margin: 6px 0; }
+  .note-body img[data-inline]:hover { outline: 2px solid #0d9488; }
   .note-body .li1 { margin: 3px 0; }
   .note-body .li2 { padding-left: 2em; margin: 3px 0; }
   .note-body .li3 { padding-left: 4em; margin: 3px 0; }
@@ -742,7 +744,7 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
   };
 
   const undo = () => setStrokes((s) => s.slice(0, -1));
-  const save = () => { cur.current = null; onSave({ strokes, grayscale }); };
+  const save = () => { cur.current = null; onSave({ strokes, grayscale, dataUrl: canvasRef.current?.toDataURL('image/jpeg', 0.85) }); };
 
   const tools = [
     { id: "pen", icon: "✏️", label: "畫筆" },
@@ -1512,8 +1514,11 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
     } catch (err) { alert('加入照片失敗：' + err.message); }
     finally { setUploading(false); }
   };
-  const saveAnnotation = async ({ strokes, grayscale }) => {
-    if (annotating.type === 'task') {
+  const saveAnnotation = async ({ strokes, grayscale, dataUrl }) => {
+    if (annotating.type === 'inline') {
+      const img = bodyRef.current?.querySelector(`img[data-inline="${annotating.imgId}"]`);
+      if (img && dataUrl) { img.src = dataUrl; updateNoteFields({ body: bodyRef.current.innerHTML }); }
+    } else if (annotating.type === 'task') {
       const task = tasks.find(t => t.id === annotating.id);
       const imgs = task.images.map((im, i) => i === annotating.imgIndex ? { ...im, strokes, grayscale } : im);
       await updateDoc(doc(db, `users/${user.uid}/tasks/${annotating.id}`), { images: imgs });
@@ -2435,6 +2440,10 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
                 suppressContentEditableWarning: true,
                 'data-placeholder': '在這裡寫工作記事…　拍照或匯入照片後，點照片即可在上面畫圖、標註。',
                 className: 'note-body',
+                onClick: (e) => {
+                  const img = e.target.tagName === 'IMG' && e.target.dataset.inline ? e.target : null;
+                  if (img) setAnnotating({ type: 'inline', imgId: img.dataset.inline, src: img.src });
+                },
                 onInput: () => {
                   const html = bodyRef.current?.innerHTML || '';
                   if (html === '<br>') bodyRef.current.innerHTML = '';
@@ -2448,7 +2457,33 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
                 },
                 onPaste: (e) => {
                   const items = Array.from(e.clipboardData?.items || []);
-                  if (items.some(it => it.type.startsWith('image/'))) { e.preventDefault(); return; }
+                  const imgItem = items.find(it => it.type.startsWith('image/'));
+                  if (imgItem) {
+                    e.preventDefault();
+                    const file = imgItem.getAsFile();
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (ev) => {
+                      const tmp = document.createElement('img');
+                      tmp.onload = () => {
+                        const MAX = 900;
+                        const scale = Math.min(1, MAX / Math.max(tmp.width, tmp.height));
+                        const w = Math.round(tmp.width * scale), h = Math.round(tmp.height * scale);
+                        const c = document.createElement('canvas');
+                        c.width = w; c.height = h;
+                        c.getContext('2d').drawImage(tmp, 0, 0, w, h);
+                        let q = 0.85, dataUrl;
+                        do { dataUrl = c.toDataURL('image/jpeg', q); q = Math.round((q - 0.1) * 10) / 10; }
+                        while (dataUrl.length > 350000 && q >= 0.3);
+                        const id = uid();
+                        document.execCommand('insertHTML', false, `<img data-inline="${id}" src="${dataUrl}" />`);
+                        updateNoteFields({ body: bodyRef.current?.innerHTML || '' });
+                      };
+                      tmp.src = ev.target.result;
+                    };
+                    reader.readAsDataURL(file);
+                    return;
+                  }
                   const ph = e.clipboardData?.getData('text/html') || '';
                   if (/<img\b/i.test(ph)) {
                     e.preventDefault();
@@ -2519,6 +2554,10 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
     ),
 
     annotating && (() => {
+      if (annotating.type === 'inline') return h(PhotoAnnotator, {
+        src: annotating.src, initialStrokes: [], initialGrayscale: false,
+        onSave: saveAnnotation, onClose: () => setAnnotating(null)
+      });
       const im = annotating.type === 'task'
         ? tasks.find(t => t.id === annotating.id)?.images[annotating.imgIndex]
         : activeNote?.images[annotating.imgIndex];
