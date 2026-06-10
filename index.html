@@ -35,6 +35,12 @@
   .note-body .li1 { margin: 3px 0; }
   .note-body .li2 { padding-left: 2em; margin: 3px 0; }
   .note-body .li3 { padding-left: 4em; margin: 3px 0; }
+  @page { margin: 0; size: A4; }
+  @media print {
+    body > *:not(#pdf-overlay) { display: none !important; }
+    #pdf-overlay { position: static !important; overflow: visible !important; padding: 12mm 18mm !important; background: #fff; }
+    #pdf-overlay .pdf-bar { display: none !important; }
+  }
 </style>
 </head>
 <body>
@@ -44,6 +50,7 @@
 {
   "imports": {
     "react": "https://esm.sh/react@18.3.1",
+    "react-dom": "https://esm.sh/react-dom@18.3.1",
     "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
     "firebase/app": "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js",
     "firebase/auth": "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js",
@@ -55,6 +62,7 @@
 <script type="module">
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { createRoot } from "react-dom/client";
+import { createPortal } from "react-dom";
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore, collection, query, orderBy, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, serverTimestamp, writeBatch, getDocs, deleteField } from "firebase/firestore";
@@ -1046,6 +1054,7 @@ function App() {
   const [allDeletedTasks, setAllDeletedTasks] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
   const [activeNote, setActiveNote] = useState(null);
+  const [pdfData, setPdfData] = useState(null);
   const [annotating, setAnnotating] = useState(null);
   const [search, setSearch] = useState("");
   const [creatingProj, setCreatingProj] = useState(false);
@@ -1352,69 +1361,20 @@ function App() {
     const bodyHtml = bodyRef.current?.innerHTML || '';
     const dateStr = activeNote.updated?.toDate
       ? activeNote.updated.toDate().toLocaleString('zh-TW') : '';
-    const esc = (s) => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-
-    // 立刻同步建立覆蓋層（讓 iOS 之後的列印按鈕點擊算使用者手勢）
-    const overlay = document.createElement('div');
-    overlay.id = 'pdf-overlay';
-    overlay.style.cssText = 'position:fixed;inset:0;background:#fff;z-index:9998;overflow-y:auto;padding:56px 20px 20px;font-family:-apple-system,"PingFang TC",sans-serif;color:#1f2937';
-
-    const bar = document.createElement('div');
-    bar.style.cssText = 'position:fixed;top:0;left:0;right:0;padding:9px 14px;background:#fff;border-bottom:1px solid #e5e7eb;display:flex;gap:8px;align-items:center;z-index:9999;box-shadow:0 2px 6px rgba(0,0,0,.06)';
-
-    const printBtn = document.createElement('button');
-    printBtn.textContent = '🖨️ 列印';
-    printBtn.disabled = true;
-    printBtn.style.cssText = 'padding:7px 16px;background:#0d9488;color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer;opacity:.5';
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.textContent = '✕ 取消';
-    cancelBtn.style.cssText = 'padding:7px 14px;background:#f1f5f9;color:#374151;border:none;border-radius:8px;font-size:14px;cursor:pointer';
-
-    const loading = document.createElement('span');
-    loading.textContent = '準備中…';
-    loading.style.cssText = 'font-size:13px;color:#94a3b8';
-
-    bar.append(printBtn, cancelBtn, loading);
-    overlay.appendChild(bar);
-    document.body.appendChild(overlay);
-
-    const printStyle = document.createElement('style');
-    printStyle.textContent =
-      `@page{margin:0;size:A4}` +
-      `@media print{body>*:not(#pdf-overlay){display:none!important}` +
-      `#pdf-overlay{position:static!important;padding:12mm 18mm!important;overflow:visible!important}` +
-      `#pdf-overlay>div:first-child{display:none!important}}`;
-    document.head.appendChild(printStyle);
-
-    const origTitle = document.title;
-    document.title = title;
-    const cleanup = () => { document.title = origTitle; overlay.remove(); printStyle.remove(); };
-    cancelBtn.addEventListener('click', cleanup);
-
-    // 非同步載入圖片
+    setPdfData({ loading: true, title, bodyHtml, dateStr, imgUrls: [] });
     const imgUrls = await Promise.all(noteImages.map(renderImageToDataUrl));
-    const imagesHtml = imgUrls.map(url =>
-      `<img src="${url}" style="max-width:100%;border-radius:8px;display:block;margin-bottom:14px">`
-    ).join('');
+    setPdfData(prev => prev ? { ...prev, loading: false, imgUrls } : null);
+  };
 
-    const content = document.createElement('div');
-    content.innerHTML =
-      `<h1 style="font-size:22px;margin:0 0 4px">${esc(title)}</h1>` +
-      (dateStr ? `<p style="font-size:12px;color:#94a3b8;margin:0 0 20px">${dateStr}</p>` : '') +
-      `<div class="note-body" style="font-size:14.5px;line-height:1.75">${bodyHtml}</div>` +
-      (imgUrls.length ? `<div style="margin-top:20px">${imagesHtml}</div>` : '');
-    overlay.appendChild(content);
-
-    loading.textContent = '點列印即可匯出';
-    printBtn.disabled = false;
-    printBtn.style.opacity = '1';
-
-    // 使用者點列印按鈕 → 此時是真實使用者手勢，iOS 不會攔截
-    printBtn.addEventListener('click', () => {
-      window.addEventListener('afterprint', cleanup, { once: true });
-      window.print();
-    });
+  const doPrint = () => {
+    if (!pdfData) return;
+    const origTitle = document.title;
+    document.title = pdfData.title;
+    window.addEventListener('afterprint', () => {
+      document.title = origTitle;
+      setPdfData(null);
+    }, { once: true });
+    window.print();
   };
 
   const applyListItem = (cls, prefix) => {
@@ -2352,7 +2312,24 @@ function App() {
       placeholder: '例如：已親送至客戶辦公室、編號 A-23',
       multiline: true, confirmText: '完成',
       onConfirm: completeTask, onCancel: () => setCompleteTaskId(null)
-    })
+    }),
+
+    pdfData && createPortal(
+      h('div', { id: 'pdf-overlay', style: { position: 'fixed', inset: 0, background: '#fff', zIndex: 9998, overflowY: 'auto', padding: '56px 20px 20px', fontFamily: '-apple-system,"PingFang TC",sans-serif', color: '#1f2937' } },
+        h('div', { className: 'pdf-bar', style: { position: 'fixed', top: 0, left: 0, right: 0, padding: '9px 14px', background: '#fff', borderBottom: '1px solid #e5e7eb', display: 'flex', gap: 8, alignItems: 'center', zIndex: 9999, boxShadow: '0 2px 6px rgba(0,0,0,.06)' } },
+          h('button', { onClick: doPrint, disabled: pdfData.loading, style: { padding: '7px 16px', background: '#0d9488', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', opacity: pdfData.loading ? 0.5 : 1 } }, '🖨️ 列印'),
+          h('button', { onClick: () => setPdfData(null), style: { padding: '7px 14px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer' } }, '✕ 取消'),
+          h('span', { style: { fontSize: 13, color: '#94a3b8' } }, pdfData.loading ? '準備中…' : '點列印即可匯出')
+        ),
+        h('h1', { style: { fontSize: 22, margin: '0 0 4px' } }, pdfData.title),
+        pdfData.dateStr && h('p', { style: { fontSize: 12, color: '#94a3b8', margin: '0 0 20px' } }, pdfData.dateStr),
+        h('div', { className: 'note-body', style: { fontSize: 14.5, lineHeight: 1.75 }, dangerouslySetInnerHTML: { __html: pdfData.bodyHtml } }),
+        pdfData.imgUrls.length > 0 && h('div', { style: { marginTop: 20 } },
+          pdfData.imgUrls.map((url, i) => h('img', { key: i, src: url, style: { maxWidth: '100%', borderRadius: 8, display: 'block', marginBottom: 14 } }))
+        )
+      ),
+      document.body
+    )
   );
 }
 
