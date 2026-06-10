@@ -1038,6 +1038,17 @@ function NewProjectInput({ onConfirm, onCancel }) {
   );
 }
 
+function NewFolderInput({ onConfirm, onCancel }) {
+  const [val, setVal] = useState('');
+  return h('div', { style: S.newProjForm },
+    h('input', { autoFocus: true, value: val, onChange: e => setVal(e.target.value),
+      onKeyDown: e => { if (e.key === 'Enter' && val.trim()) onConfirm(val.trim()); if (e.key === 'Escape') onCancel(); },
+      placeholder: '資料夾名稱…', style: S.newProjField }),
+    h('button', { onClick: () => val.trim() && onConfirm(val.trim()), style: { ...S.miniBtn, background: '#0d9488', color: '#fff' } }, '✓'),
+    h('button', { onClick: onCancel, style: { ...S.miniBtn, background: '#f1f5f9', color: '#64748b' } }, '✕')
+  );
+}
+
 // ─────────────────────────────────────────────────────────────
 // 主應用
 // ─────────────────────────────────────────────────────────────
@@ -1077,7 +1088,9 @@ function App() {
   const [noteFolders, setNoteFolders] = useState([]);
   const [collapsedFolders, setCollapsedFolders] = useState(new Set());
   const [folderMenu, setFolderMenu] = useState(null);
-  const [folderNameModal, setFolderNameModal] = useState(null); // { title, initial, onSave }
+  const [creatingProjFolder, setCreatingProjFolder] = useState(false);
+  const [creatingNoteFolder, setCreatingNoteFolder] = useState(false);
+  const [renamingFolder, setRenamingFolder] = useState(null); // { type:'project'|'note', id, val }
 
   // 👇 這是控制手機版顯示哪一個欄位的狀態
   const [mobileView, setMobileView] = useState('sidebar'); // 'sidebar' | 'list' | 'editor'
@@ -1275,43 +1288,23 @@ function App() {
   };
 
   const toggleFolder = (id) => setCollapsedFolders(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
-  const createProjectFolder = () => setFolderNameModal({
-    title: '新增資料夾',
-    initial: '',
-    onSave: async (name) => {
-      await addDoc(collection(db, `users/${user.uid}/projectFolders`), { name, created: serverTimestamp(), sortOrder: Date.now(), pinned: false });
-      setFolderNameModal(null);
-    }
-  });
-  const renameProjectFolder = (id, cur) => setFolderNameModal({
-    title: '重新命名資料夾',
-    initial: cur,
-    onSave: async (name) => {
-      if (name !== cur) await updateDoc(doc(db, `users/${user.uid}/projectFolders/${id}`), { name });
-      setFolderNameModal(null);
-    }
-  });
+  const createProjectFolder = () => setCreatingProjFolder(true);
+  const renameProjectFolder = (id, cur) => setRenamingFolder({ type: 'project', id, val: cur });
+  const doSaveFolderRename = async () => {
+    if (!renamingFolder) return;
+    const { type, id, val } = renamingFolder;
+    setRenamingFolder(null);
+    if (!val.trim()) return;
+    const col = type === 'project' ? 'projectFolders' : 'noteFolders';
+    const folders = type === 'project' ? projectFolders : noteFolders;
+    const folder = folders.find(f => f.id === id);
+    if (folder && val.trim() !== folder.name)
+      await updateDoc(doc(db, `users/${user.uid}/${col}/${id}`), { name: val.trim() });
+  };
   const deleteProjectFolder = async (id) => { const b = writeBatch(db); projects.filter(p => p.folderId === id).forEach(p => b.update(doc(db, `users/${user.uid}/projects/${p.id}`), { folderId: null })); b.delete(doc(db, `users/${user.uid}/projectFolders/${id}`)); await b.commit(); };
   const setProjectFolder = async (pid, fid) => { await updateDoc(doc(db, `users/${user.uid}/projects/${pid}`), { folderId: fid || null }); setFolderMenu(null); };
-  const createNoteFolder = () => {
-    if (!activeProject) return;
-    setFolderNameModal({
-      title: '新增資料夾',
-      initial: '',
-      onSave: async (name) => {
-        await addDoc(collection(db, `users/${user.uid}/noteFolders`), { name, projectId: activeProject.id, created: serverTimestamp(), sortOrder: Date.now(), pinned: false });
-        setFolderNameModal(null);
-      }
-    });
-  };
-  const renameNoteFolder = (id, cur) => setFolderNameModal({
-    title: '重新命名資料夾',
-    initial: cur,
-    onSave: async (name) => {
-      if (name !== cur) await updateDoc(doc(db, `users/${user.uid}/noteFolders/${id}`), { name });
-      setFolderNameModal(null);
-    }
-  });
+  const createNoteFolder = () => { if (activeProject) setCreatingNoteFolder(true); };
+  const renameNoteFolder = (id, cur) => setRenamingFolder({ type: 'note', id, val: cur });
   const deleteNoteFolder = async (id) => { const b = writeBatch(db); notes.filter(n => n.folderId === id).forEach(n => b.update(doc(db, `users/${user.uid}/notes/${n.id}`), { folderId: null })); b.delete(doc(db, `users/${user.uid}/noteFolders/${id}`)); await b.commit(); };
   const setNoteFolder = async (nid, fid) => { await updateDoc(doc(db, `users/${user.uid}/notes/${nid}`), { folderId: fid || null }); setFolderMenu(null); };
 
@@ -1890,6 +1883,14 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
     h('div', { style: S.brand }, '📷 照片筆記'),
     !showTrash && (creatingProj
       ? h(NewProjectInput, { onConfirm: createProject, onCancel: () => setCreatingProj(false) })
+      : creatingProjFolder
+      ? h(NewFolderInput, {
+          onConfirm: async (name) => {
+            await addDoc(collection(db, `users/${user.uid}/projectFolders`), { name, created: serverTimestamp(), sortOrder: Date.now(), pinned: false });
+            setCreatingProjFolder(false);
+          },
+          onCancel: () => setCreatingProjFolder(false)
+        })
       : h('div', { style: { display: 'flex', gap: 4, padding: '0 4px' } },
           h('button', { onClick: () => setCreatingProj(true), style: { ...S.newProjBtn, flex: 1, margin: 0 } }, '+ 新增專案'),
           h('button', { onClick: createProjectFolder, style: { ...S.ghostBtn, fontSize: 13, padding: '4px 8px', flexShrink: 0 }, title: '新增資料夾' }, '📁+')
@@ -1912,11 +1913,19 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
             },
               h('span', { style: { cursor: 'grab', color: '#cbd5e1', fontSize: 12, userSelect: 'none', marginRight: 1 } }, '⠿'),
               h('span', { onClick: () => toggleFolder(folder.id), style: { cursor: 'pointer', marginRight: 2, fontSize: 10 } }, collapsed ? '▶' : '▼'),
-              h('span', { onClick: () => toggleFolder(folder.id), style: { cursor: 'pointer', flex: 1 } }, `📁 ${folder.name} (${fps.length})`),
-              h('span', { onClick: (e) => { e.stopPropagation(); toggleProjectFolderPin(folder.id, folder.pinned); },
-                style: { cursor: 'pointer', fontSize: 11, opacity: folder.pinned ? 1 : 0.25, color: folder.pinned ? '#0d9488' : '#64748b', padding: '0 3px' }, title: folder.pinned ? '取消釘選' : '釘選' }, '📌'),
-              h('span', { onClick: (e) => { e.stopPropagation(); renameProjectFolder(folder.id, folder.name); }, style: { cursor: 'pointer', opacity: 0.45, padding: '0 3px' }, title: '改名' }, '✏️'),
-              h('span', { onClick: (e) => { e.stopPropagation(); if (window.confirm(`刪除「${folder.name}」？專案移到未分類`)) deleteProjectFolder(folder.id); }, style: { cursor: 'pointer', opacity: 0.45, padding: '0 3px' }, title: '刪除資料夾' }, '🗑')
+              ...((renamingFolder?.type === 'project' && renamingFolder.id === folder.id)
+                ? [h('input', { autoFocus: true, value: renamingFolder.val,
+                    onChange: e => setRenamingFolder({ ...renamingFolder, val: e.target.value }),
+                    onKeyDown: e => { if (e.key === 'Enter') { e.stopPropagation(); doSaveFolderRename(); } if (e.key === 'Escape') { e.stopPropagation(); setRenamingFolder(null); } },
+                    onBlur: doSaveFolderRename, onClick: e => e.stopPropagation(),
+                    style: { flex: 1, border: '1px solid #0d9488', borderRadius: 4, padding: '2px 6px', fontSize: 12, outline: 'none' } })]
+                : [
+                    h('span', { onClick: () => toggleFolder(folder.id), style: { cursor: 'pointer', flex: 1 } }, `📁 ${folder.name} (${fps.length})`),
+                    h('span', { onClick: (e) => { e.stopPropagation(); toggleProjectFolderPin(folder.id, folder.pinned); },
+                      style: { cursor: 'pointer', fontSize: 11, opacity: folder.pinned ? 1 : 0.25, color: folder.pinned ? '#0d9488' : '#64748b', padding: '0 3px' }, title: folder.pinned ? '取消釘選' : '釘選' }, '📌'),
+                    h('span', { onClick: (e) => { e.stopPropagation(); renameProjectFolder(folder.id, folder.name); }, style: { cursor: 'pointer', opacity: 0.45, padding: '0 3px' }, title: '改名' }, '✏️'),
+                    h('span', { onClick: (e) => { e.stopPropagation(); if (window.confirm(`刪除「${folder.name}」？專案移到未分類`)) deleteProjectFolder(folder.id); }, style: { cursor: 'pointer', opacity: 0.45, padding: '0 3px' }, title: '刪除資料夾' }, '🗑')
+                  ])
             ),
             !collapsed && fps.map(p =>
               h(ProjectItem, {
@@ -2131,6 +2140,15 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
             h('div', { style: S.noteDate }, fmt(n.updated))
           );
           return h('div', null,
+            creatingNoteFolder && h('div', { style: { padding: '8px 14px' } },
+              h(NewFolderInput, {
+                onConfirm: async (name) => {
+                  await addDoc(collection(db, `users/${user.uid}/noteFolders`), { name, projectId: activeProject.id, created: serverTimestamp(), sortOrder: Date.now(), pinned: false });
+                  setCreatingNoteFolder(false);
+                },
+                onCancel: () => setCreatingNoteFolder(false)
+              })
+            ),
             filtered.length === 0 && h('div', { style: S.empty }, search ? '找不到符合的筆記' : '點「新筆記」開始'),
             ...[
               ...sortedNoteFolders.map(folder => {
@@ -2148,11 +2166,19 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
                   },
                     h('span', { style: { cursor: 'grab', color: '#cbd5e1', fontSize: 12, userSelect: 'none', marginRight: 1 } }, '⠿'),
                     h('span', { onClick: () => toggleFolder(folder.id), style: { cursor: 'pointer', marginRight: 2, fontSize: 10 } }, collapsed ? '▶' : '▼'),
-                    h('span', { onClick: () => toggleFolder(folder.id), style: { cursor: 'pointer', flex: 1 } }, `📁 ${folder.name} (${fns.length})`),
-                    h('span', { onClick: (e) => { e.stopPropagation(); toggleNoteFolderPin(folder.id, folder.pinned); },
-                      style: { cursor: 'pointer', fontSize: 11, opacity: folder.pinned ? 1 : 0.25, color: folder.pinned ? '#0d9488' : '#64748b', padding: '0 3px' }, title: folder.pinned ? '取消釘選' : '釘選' }, '📌'),
-                    h('span', { onClick: () => renameNoteFolder(folder.id, folder.name), style: { cursor: 'pointer', opacity: 0.45, padding: '0 3px' } }, '✏️'),
-                    h('span', { onClick: () => { if (window.confirm(`刪除「${folder.name}」？筆記移到未分類`)) deleteNoteFolder(folder.id); }, style: { cursor: 'pointer', opacity: 0.45, padding: '0 3px' } }, '🗑')
+                    ...((renamingFolder?.type === 'note' && renamingFolder.id === folder.id)
+                      ? [h('input', { autoFocus: true, value: renamingFolder.val,
+                          onChange: e => setRenamingFolder({ ...renamingFolder, val: e.target.value }),
+                          onKeyDown: e => { if (e.key === 'Enter') { e.stopPropagation(); doSaveFolderRename(); } if (e.key === 'Escape') { e.stopPropagation(); setRenamingFolder(null); } },
+                          onBlur: doSaveFolderRename, onClick: e => e.stopPropagation(),
+                          style: { flex: 1, border: '1px solid #0d9488', borderRadius: 4, padding: '2px 6px', fontSize: 12, outline: 'none' } })]
+                      : [
+                          h('span', { onClick: () => toggleFolder(folder.id), style: { cursor: 'pointer', flex: 1 } }, `📁 ${folder.name} (${fns.length})`),
+                          h('span', { onClick: (e) => { e.stopPropagation(); toggleNoteFolderPin(folder.id, folder.pinned); },
+                            style: { cursor: 'pointer', fontSize: 11, opacity: folder.pinned ? 1 : 0.25, color: folder.pinned ? '#0d9488' : '#64748b', padding: '0 3px' }, title: folder.pinned ? '取消釘選' : '釘選' }, '📌'),
+                          h('span', { onClick: () => renameNoteFolder(folder.id, folder.name), style: { cursor: 'pointer', opacity: 0.45, padding: '0 3px' } }, '✏️'),
+                          h('span', { onClick: () => { if (window.confirm(`刪除「${folder.name}」？筆記移到未分類`)) deleteNoteFolder(folder.id); }, style: { cursor: 'pointer', opacity: 0.45, padding: '0 3px' } }, '🗑')
+                        ])
                   ),
                   !collapsed && fns.map(n => renderNoteItem(n))
                 );
@@ -2485,14 +2511,6 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
       placeholder: '例如：已親送至客戶辦公室、編號 A-23',
       multiline: true, confirmText: '完成',
       onConfirm: completeTask, onCancel: () => setCompleteTaskId(null)
-    }),
-    folderNameModal && h(TextModal, {
-      title: folderNameModal.title,
-      placeholder: '資料夾名稱',
-      initial: folderNameModal.initial,
-      confirmText: '確定',
-      onConfirm: folderNameModal.onSave,
-      onCancel: () => setFolderNameModal(null)
     }),
     folderMenu && h('div', { style: S.modalOverlay, onClick: () => setFolderMenu(null) },
       h('div', { style: { ...S.modalCard, maxWidth: 260 }, onClick: e => e.stopPropagation() },
