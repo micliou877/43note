@@ -1372,18 +1372,24 @@ ul,ol{padding-left:1.5em;margin:4px 0}li{margin:2px 0}
 blockquote{margin:4px 0 4px 1.5em;padding-left:8px;border-left:3px solid #d1d5db;color:#6b7280}
 .photos{margin-top:20px;display:flex;flex-direction:column;gap:14px}
 .photo img{max-width:100%;border-radius:8px;display:block}
-@media print{body{margin:0;padding:12mm 18mm;max-width:none}}
+.close-btn{position:fixed;top:12px;right:12px;padding:8px 18px;background:#0d9488;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:999}
+@media print{body{margin:0;padding:12mm 18mm;max-width:none}.close-btn{display:none}}
 </style></head><body>
+<button class="close-btn" onclick="window.close()">✕ 關閉</button>
 <h1>${esc(title)}</h1>
 ${dateStr ? `<p class="date">${dateStr}</p>` : ''}
 <div class="body">${bodyHtml}</div>
 ${imgUrls.length ? `<div class="photos">${imagesHtml}</div>` : ''}
-<script>window.onload=function(){window.print();}<\/script>
+<script>
+window.addEventListener('afterprint', function(){ window.close(); });
+window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
+<\/script>
 </body></html>`;
-    const win = window.open('', '_blank');
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const blobUrl = URL.createObjectURL(blob);
+    const win = window.open(blobUrl, '_blank');
     if (!win) { alert('請先允許彈出視窗'); return; }
-    win.document.write(html);
-    win.document.close();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
   };
 
   const applyListItem = (cls, prefix) => {
