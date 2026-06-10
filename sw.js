@@ -1,4 +1,4 @@
-const CACHE = '43note-v3';
+const CACHE = '43note-v4';
 
 self.addEventListener('install', () => self.skipWaiting());
 
