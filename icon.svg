@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- 白底圓角（iOS app icon 風格） -->
+  <rect width="100" height="100" rx="22" fill="white"/>
+  <!-- 鋼筆，斜放 45 度 -->
+  <g transform="translate(50,50) rotate(-45) scale(0.88)">
+    <!-- 筆蓋（頂端圓角） -->
+    <rect x="-7" y="-44" width="14" height="17" rx="5" fill="#111827"/>
+    <!-- 蓋與身分隔線 -->
+    <rect x="-7" y="-27" width="14" height="3" fill="white"/>
+    <!-- 筆身 -->
+    <rect x="-7" y="-24" width="14" height="44" fill="#111827"/>
+    <!-- 筆尖（三角形） -->
+    <polygon points="-7,20 7,20 0,40" fill="#111827"/>
+    <!-- 筆尖中線 -->
+    <line x1="0" y1="20" x2="0" y2="40" stroke="white" stroke-width="1.5" opacity="0.4"/>
+  </g>
+</svg>
