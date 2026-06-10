@@ -19,6 +19,8 @@
 
   /* 👇 手機版 RWD 樣式機制（解決螢幕擠壓問題） */
   .mobile-only { display: none !important; }
+  .resize-handle { width: 5px; flex-shrink: 0; cursor: col-resize; background: transparent; transition: background 0.15s; }
+  .resize-handle:hover { background: #0d9488; }
   @media (max-width: 768px) {
     .hide-on-mobile { display: none !important; }
     .mobile-full-width {
@@ -1096,6 +1098,7 @@ function App() {
 
   // 👇 這是控制手機版顯示哪一個欄位的狀態
   const [mobileView, setMobileView] = useState('sidebar'); // 'sidebar' | 'list' | 'editor'
+  const [sidebarWidth, setSidebarWidth] = useState(() => parseInt(localStorage.getItem('sidebarW') || '230'));
 
   const lastLocalEdit = useRef(0);
   const dragId        = useRef(null);
@@ -1880,8 +1883,29 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
     },
   });
 
+  // Sidebar 拖曳調整寬度
+  const startSidebarResize = (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = sidebarWidth;
+    const onMove = (e) => setSidebarWidth(Math.max(150, Math.min(420, startW + e.clientX - startX)));
+    const onUp = (e) => {
+      const w = Math.max(150, Math.min(420, startW + e.clientX - startX));
+      localStorage.setItem('sidebarW', w);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+  const resizeHandle = h('div', { className: 'resize-handle hide-on-mobile', onMouseDown: startSidebarResize });
+
   // 渲染專案列表 (Sidebar)
-  const sidebar = h('aside', { className: mobileView === 'sidebar' ? 'mobile-full-width' : 'hide-on-mobile', style: S.sidebar, ...swipeHandlers('sidebar') },
+  const sidebar = h('aside', { className: mobileView === 'sidebar' ? 'mobile-full-width' : 'hide-on-mobile', style: { ...S.sidebar, width: sidebarWidth }, ...swipeHandlers('sidebar') },
     h('div', { style: S.brand }, '📷 照片筆記'),
     !showTrash && (creatingProj
       ? h(NewProjectInput, { onConfirm: createProject, onCancel: () => setCreatingProj(false) })
@@ -2026,6 +2050,7 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
     return h('div', { style: S.app },
       offlineBanner,
       sidebar,
+      resizeHandle,
       h('main', { className: mobileView === 'list' ? 'mobile-full-width' : 'hide-on-mobile', style: { ...S.editorCol, padding: 24, overflowY: 'auto' }, ...swipeHandlers('trash') },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 } },
           h('button', { className: 'mobile-only', onClick: () => setMobileView('sidebar'), style: { background: 'none', border: 'none', fontSize: 24, padding: '0 8px', cursor: 'pointer', color: '#64748b' } }, '‹'),
@@ -2082,6 +2107,7 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
   return h('div', { style: S.app },
     offlineBanner,
     sidebar,
+    resizeHandle,
 
     // 渲染清單 (List Column)
     activeProject && h('section', { className: mobileView === 'list' ? 'mobile-full-width' : 'hide-on-mobile', style: S.listCol, ...swipeHandlers('list') },
