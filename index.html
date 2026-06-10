@@ -1961,10 +1961,11 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
     h('div', { style: { overflowY: "auto", flex: 1, marginTop: 4 } },
       !showTrash && activeProjects.length === 0 && projectFolders.length === 0 && !creatingProj && h('div', { style: S.empty }, '還沒有專案'),
       !showTrash && [
-        ...sortedProjectFolders.map(folder => {
+        ...sortedProjectFolders.map((folder, fi) => {
           const fps = activeProjects.filter(p => p.folderId === folder.id);
           const collapsed = collapsedFolders.has(folder.id);
-          return h('div', { key: `pf-${folder.id}`, style: { background: '#f0fdfa', borderRadius: 6, marginBottom: 4, overflow: 'hidden' } },
+          const folderBgs = ['#f0fdfa','#f0f4ff','#fef9ee','#fff0f9'];
+          return h('div', { key: `pf-${folder.id}`, style: { background: folderBgs[fi % folderBgs.length], borderRadius: 6, marginBottom: 4, overflow: 'hidden' } },
             h('div', {
               draggable: true,
               onDragStart: (e) => { dragId.current = folder.id; dragType.current = 'projectFolder'; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.style.opacity = '0.5'; },
@@ -2216,10 +2217,11 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
             ),
             filtered.length === 0 && h('div', { style: S.empty }, search ? '找不到符合的筆記' : '點「新筆記」開始'),
             ...[
-              ...sortedNoteFolders.map(folder => {
+              ...sortedNoteFolders.map((folder, fi) => {
                 const fns = filtered.filter(n => n.folderId === folder.id);
                 const collapsed = collapsedFolders.has(folder.id);
-                return h('div', { key: `nf-${folder.id}`, style: { background: '#f0fdfa', borderRadius: 6, marginBottom: 4, overflow: 'hidden' } },
+                const folderBgs = ['#f0fdfa','#f0f4ff','#fef9ee','#fff0f9'];
+                return h('div', { key: `nf-${folder.id}`, style: { background: folderBgs[fi % folderBgs.length], borderRadius: 6, marginBottom: 4, overflow: 'hidden' } },
                   h('div', {
                     draggable: true,
                     onDragStart: (e) => { dragId.current = folder.id; dragType.current = 'noteFolder'; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.style.opacity = '0.5'; },
