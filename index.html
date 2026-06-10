@@ -1192,7 +1192,7 @@ function App() {
 
   useEffect(() => {
     if (!user || !activeProject) { setNoteFolders([]); return; }
-    return onSnapshot(query(collection(db, `users/${user.uid}/noteFolders`), where('projectId', '==', activeProject.id), orderBy('created', 'asc')),
+    return onSnapshot(query(collection(db, `users/${user.uid}/noteFolders`), where('projectId', '==', activeProject.id)),
       snap => setNoteFolders(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
   }, [user, activeProject]);
 
