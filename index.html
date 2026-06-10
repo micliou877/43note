@@ -39,6 +39,7 @@
   .note-body blockquote { margin: 4px 0 4px 1.5em; padding-left: 8px; border-left: 3px solid #d1d5db; color: #6b7280; }
   .note-body img[data-inline] { max-width: 100%; border-radius: 6px; cursor: pointer; display: block; margin: 6px 0; }
   .note-body img[data-inline]:hover { outline: 2px solid #0d9488; }
+  .note-body img[data-inline].img-sel { outline: 2px solid #0d9488; }
   .note-body .li1 { margin: 3px 0; }
   .note-body .li2 { padding-left: 2em; margin: 3px 0; }
   .note-body .li3 { padding-left: 4em; margin: 3px 0; }
@@ -1069,6 +1070,7 @@ function App() {
   const [activeProject, setActiveProject] = useState(null);
   const [activeNote, setActiveNote] = useState(null);
   const [annotating, setAnnotating] = useState(null);
+  const [selImg, setSelImg] = useState(null); // { imgId, src, rect } for inline image selection
   const [search, setSearch] = useState("");
   const [creatingProj, setCreatingProj] = useState(false);
   const [confirmDel, setConfirmDel] = useState(null);
@@ -1527,6 +1529,36 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
       if (img) await updateDoc(imgDoc(img.id), { strokes, grayscale });
     }
     setAnnotating(null);
+  };
+  const selectInlineImg = (imgEl) => {
+    document.querySelectorAll('.note-body img.img-sel').forEach(el => el.classList.remove('img-sel'));
+    imgEl.classList.add('img-sel');
+    setSelImg({ imgId: imgEl.dataset.inline, src: imgEl.src, rect: imgEl.getBoundingClientRect() });
+  };
+  const clearSelImg = () => {
+    document.querySelectorAll('.note-body img.img-sel').forEach(el => el.classList.remove('img-sel'));
+    setSelImg(null);
+  };
+  const deleteInlineImg = (imgId) => {
+    const img = bodyRef.current?.querySelector(`img[data-inline="${imgId}"]`);
+    if (img) { img.remove(); updateNoteFields({ body: bodyRef.current.innerHTML }); }
+  };
+  const startImgResize = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const img = bodyRef.current?.querySelector(`img[data-inline="${selImg?.imgId}"]`);
+    if (!img) return;
+    const startX = e.clientX, startW = img.getBoundingClientRect().width;
+    const onMove = (e) => { img.style.width = Math.max(60, startW + e.clientX - startX) + 'px'; };
+    const onUp = () => {
+      updateNoteFields({ body: bodyRef.current.innerHTML });
+      setSelImg(s => s ? { ...s, rect: img.getBoundingClientRect() } : s);
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+    };
+    document.body.style.cursor = 'se-resize';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
   };
   const delImage = async (imgId) => {
     await deleteDoc(imgDoc(imgId));
@@ -2151,7 +2183,7 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
       h('div', { ref: taskListRef, style: { overflowY: "auto", flex: 1 } },
         tab === 'notes' && (() => {
           const renderNoteItem = (n) => h('div', { key: n.id,
-            onClick: () => { saveIfDirtyRef.current?.(); setSaveStatus('idle'); setActiveNote(n); setMobileView('editor'); },
+            onClick: () => { saveIfDirtyRef.current?.(); setSaveStatus('idle'); setActiveNote(n); setMobileView('editor'); clearSelImg(); },
             draggable: true,
             onDragStart: (e) => { dragId.current = n.id; dragType.current = 'note'; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.style.opacity = '0.4'; },
             onDragEnd:   (e) => { e.currentTarget.style.opacity = '1'; dragId.current = null; },
@@ -2442,7 +2474,8 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
                 className: 'note-body',
                 onClick: (e) => {
                   const img = e.target.tagName === 'IMG' && e.target.dataset.inline ? e.target : null;
-                  if (img) setAnnotating({ type: 'inline', imgId: img.dataset.inline, src: img.src });
+                  if (img) selectInlineImg(img);
+                  else clearSelImg();
                 },
                 onInput: () => {
                   const html = bodyRef.current?.innerHTML || '';
@@ -2553,6 +2586,33 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
           )
     ),
 
+    selImg && (() => {
+      const r = selImg.rect;
+      const btnStyle = { color: '#fff', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, padding: '2px 7px', borderRadius: 4 };
+      const setW = (w) => {
+        const img = bodyRef.current?.querySelector(`img[data-inline="${selImg.imgId}"]`);
+        if (img) { img.style.width = w; updateNoteFields({ body: bodyRef.current.innerHTML }); setSelImg(s => s ? { ...s, rect: img.getBoundingClientRect() } : s); }
+      };
+      return h(React.Fragment, null,
+        h('div', { onMouseDown: e => e.preventDefault(),
+          style: { position: 'fixed', top: Math.max(4, r.top - 40), left: r.left, zIndex: 400,
+            background: '#1f2937', borderRadius: 6, padding: '2px 4px', display: 'flex', alignItems: 'center', gap: 1,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.4)', whiteSpace: 'nowrap' } },
+          h('span', { style: { color: '#9ca3af', fontSize: 11, padding: '0 4px' } }, '大小:'),
+          h('button', { style: btnStyle, onClick: () => setW('25%') }, '小'),
+          h('button', { style: btnStyle, onClick: () => setW('50%') }, '中'),
+          h('button', { style: btnStyle, onClick: () => setW('100%') }, '大'),
+          h('div', { style: { width: 1, background: '#4b5563', margin: '4px 2px', alignSelf: 'stretch' } }),
+          h('button', { style: { ...btnStyle, color: '#5eead4' },
+            onClick: () => { setAnnotating({ type: 'inline', imgId: selImg.imgId, src: selImg.src }); clearSelImg(); } }, '✏️ 標注'),
+          h('button', { style: { ...btnStyle, color: '#fca5a5' },
+            onClick: () => { deleteInlineImg(selImg.imgId); clearSelImg(); } }, '🗑'),
+        ),
+        h('div', { onMouseDown: startImgResize,
+          style: { position: 'fixed', left: r.right - 8, top: r.bottom - 8, width: 14, height: 14,
+            background: '#0d9488', border: '2px solid #fff', borderRadius: 2, cursor: 'se-resize', zIndex: 401 } })
+      );
+    })(),
     annotating && (() => {
       if (annotating.type === 'inline') return h(PhotoAnnotator, {
         src: annotating.src, initialStrokes: [], initialGrayscale: false,
