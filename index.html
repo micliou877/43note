@@ -1385,11 +1385,10 @@ window.addEventListener('afterprint', function(){ window.close(); });
 window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
 <\/script>
 </body></html>`;
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-    const blobUrl = URL.createObjectURL(blob);
-    const win = window.open(blobUrl, '_blank');
+    const win = window.open('', '_blank');
     if (!win) { alert('請先允許彈出視窗'); return; }
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+    win.document.write(html);
+    win.document.close();
   };
 
   const applyListItem = (cls, prefix) => {
