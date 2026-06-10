@@ -1274,11 +1274,11 @@ function App() {
   };
 
   const toggleFolder = (id) => setCollapsedFolders(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
-  const createProjectFolder = async () => { const name = prompt('資料夾名稱'); if (name?.trim()) await addDoc(collection(db, `users/${user.uid}/projectFolders`), { name: name.trim(), created: serverTimestamp() }); };
+  const createProjectFolder = async () => { const name = prompt('資料夾名稱'); if (name?.trim()) await addDoc(collection(db, `users/${user.uid}/projectFolders`), { name: name.trim(), created: serverTimestamp(), sortOrder: Date.now(), pinned: false }); };
   const renameProjectFolder = async (id, cur) => { const name = prompt('資料夾名稱', cur); if (name?.trim() && name.trim() !== cur) await updateDoc(doc(db, `users/${user.uid}/projectFolders/${id}`), { name: name.trim() }); };
   const deleteProjectFolder = async (id) => { const b = writeBatch(db); projects.filter(p => p.folderId === id).forEach(p => b.update(doc(db, `users/${user.uid}/projects/${p.id}`), { folderId: null })); b.delete(doc(db, `users/${user.uid}/projectFolders/${id}`)); await b.commit(); };
   const setProjectFolder = async (pid, fid) => { await updateDoc(doc(db, `users/${user.uid}/projects/${pid}`), { folderId: fid || null }); setFolderMenu(null); };
-  const createNoteFolder = async () => { const name = prompt('資料夾名稱'); if (name?.trim() && activeProject) await addDoc(collection(db, `users/${user.uid}/noteFolders`), { name: name.trim(), projectId: activeProject.id, created: serverTimestamp() }); };
+  const createNoteFolder = async () => { const name = prompt('資料夾名稱'); if (name?.trim() && activeProject) await addDoc(collection(db, `users/${user.uid}/noteFolders`), { name: name.trim(), projectId: activeProject.id, created: serverTimestamp(), sortOrder: Date.now(), pinned: false }); };
   const renameNoteFolder = async (id, cur) => { const name = prompt('資料夾名稱', cur); if (name?.trim() && name.trim() !== cur) await updateDoc(doc(db, `users/${user.uid}/noteFolders/${id}`), { name: name.trim() }); };
   const deleteNoteFolder = async (id) => { const b = writeBatch(db); notes.filter(n => n.folderId === id).forEach(n => b.update(doc(db, `users/${user.uid}/notes/${n.id}`), { folderId: null })); b.delete(doc(db, `users/${user.uid}/noteFolders/${id}`)); await b.commit(); };
   const setNoteFolder = async (nid, fid) => { await updateDoc(doc(db, `users/${user.uid}/notes/${nid}`), { folderId: fid || null }); setFolderMenu(null); };
@@ -1589,6 +1589,8 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
     const batch = writeBatch(db);
     const col = type === 'project' ? `users/${user.uid}/projects`
       : type === 'note' ? `users/${user.uid}/notes`
+      : type === 'projectFolder' ? `users/${user.uid}/projectFolders`
+      : type === 'noteFolder' ? `users/${user.uid}/noteFolders`
       : `users/${user.uid}/tasks`;
     arr.forEach((item, idx) => batch.update(doc(db, `${col}/${item.id}`), { sortOrder: (idx + 1) * 1000 }));
     await batch.commit();
@@ -1601,6 +1603,12 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
   };
   const toggleTaskPin = async (id, pinned) => {
     await updateDoc(doc(db, `users/${user.uid}/tasks/${id}`), { pinned: !pinned });
+  };
+  const toggleProjectFolderPin = async (id, pinned) => {
+    await updateDoc(doc(db, `users/${user.uid}/projectFolders/${id}`), { pinned: !pinned });
+  };
+  const toggleNoteFolderPin = async (id, pinned) => {
+    await updateDoc(doc(db, `users/${user.uid}/noteFolders/${id}`), { pinned: !pinned });
   };
   const updateTaskTitle = async (id, title) => {
     if (!title.trim()) { setEditingTask(null); return; }
@@ -1785,6 +1793,10 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
 
   const activeProjects = projects.filter(p => !p.deleted).sort((a, b) =>
     byOrder(a, b) || getSafeTime(b.created) - getSafeTime(a.created));
+  const sortedProjectFolders = [...projectFolders].sort((a, b) =>
+    byOrder(a, b) || getSafeTime(a.created) - getSafeTime(b.created));
+  const sortedNoteFolders = [...noteFolders].sort((a, b) =>
+    byOrder(a, b) || getSafeTime(a.created) - getSafeTime(b.created));
   const deletedProjects = projects.filter(p => p.deleted);
   const visibleNotes = notes.filter(n => !n.deleted);
   const visibleTasks = tasks.filter(t => !t.deleted);
@@ -1853,13 +1865,24 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
     h('div', { style: { overflowY: "auto", flex: 1, marginTop: 4 } },
       !showTrash && activeProjects.length === 0 && projectFolders.length === 0 && !creatingProj && h('div', { style: S.empty }, '還沒有專案'),
       !showTrash && [
-        ...projectFolders.map(folder => {
+        ...sortedProjectFolders.map(folder => {
           const fps = activeProjects.filter(p => p.folderId === folder.id);
           const collapsed = collapsedFolders.has(folder.id);
           return h('div', { key: `pf-${folder.id}` },
-            h('div', { style: { display: 'flex', alignItems: 'center', padding: '5px 10px 3px', fontSize: 12, fontWeight: 600, color: '#64748b', userSelect: 'none', gap: 2 } },
+            h('div', {
+              draggable: true,
+              onDragStart: (e) => { dragId.current = folder.id; dragType.current = 'projectFolder'; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.style.opacity = '0.5'; },
+              onDragEnd:   (e) => { e.currentTarget.style.opacity = '1'; dragId.current = null; },
+              onDragOver:  (e) => { e.preventDefault(); if (dragType.current === 'projectFolder') e.currentTarget.style.background = '#f0fdfa'; },
+              onDragLeave: (e) => { e.currentTarget.style.background = ''; },
+              onDrop:      (e) => { e.preventDefault(); e.currentTarget.style.background = ''; if (dragId.current && dragId.current !== folder.id && dragType.current === 'projectFolder') reorder('projectFolder', sortedProjectFolders, dragId.current, folder.id); dragId.current = null; },
+              style: { display: 'flex', alignItems: 'center', padding: '5px 10px 3px', fontSize: 12, fontWeight: 600, color: '#64748b', userSelect: 'none', gap: 2 }
+            },
+              h('span', { style: { cursor: 'grab', color: '#cbd5e1', fontSize: 12, userSelect: 'none', marginRight: 1 } }, '⠿'),
               h('span', { onClick: () => toggleFolder(folder.id), style: { cursor: 'pointer', marginRight: 2, fontSize: 10 } }, collapsed ? '▶' : '▼'),
               h('span', { onClick: () => toggleFolder(folder.id), style: { cursor: 'pointer', flex: 1 } }, `📁 ${folder.name} (${fps.length})`),
+              h('span', { onClick: (e) => { e.stopPropagation(); toggleProjectFolderPin(folder.id, folder.pinned); },
+                style: { cursor: 'pointer', fontSize: 11, opacity: folder.pinned ? 1 : 0.25, color: folder.pinned ? '#0d9488' : '#64748b', padding: '0 3px' }, title: folder.pinned ? '取消釘選' : '釘選' }, '📌'),
               h('span', { onClick: (e) => { e.stopPropagation(); renameProjectFolder(folder.id, folder.name); }, style: { cursor: 'pointer', opacity: 0.45, padding: '0 3px' }, title: '改名' }, '✏️'),
               h('span', { onClick: (e) => { e.stopPropagation(); if (window.confirm(`刪除「${folder.name}」？專案移到未分類`)) deleteProjectFolder(folder.id); }, style: { cursor: 'pointer', opacity: 0.45, padding: '0 3px' }, title: '刪除資料夾' }, '🗑')
             ),
@@ -2078,13 +2101,24 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
           return h('div', null,
             filtered.length === 0 && h('div', { style: S.empty }, search ? '找不到符合的筆記' : '點「新筆記」開始'),
             ...[
-              ...noteFolders.map(folder => {
+              ...sortedNoteFolders.map(folder => {
                 const fns = filtered.filter(n => n.folderId === folder.id);
                 const collapsed = collapsedFolders.has(folder.id);
                 return h('div', { key: `nf-${folder.id}` },
-                  h('div', { style: { display: 'flex', alignItems: 'center', padding: '6px 14px 3px', fontSize: 12, fontWeight: 600, color: '#64748b', userSelect: 'none', gap: 2, borderTop: '1px solid #f1f5f9' } },
+                  h('div', {
+                    draggable: true,
+                    onDragStart: (e) => { dragId.current = folder.id; dragType.current = 'noteFolder'; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.style.opacity = '0.5'; },
+                    onDragEnd:   (e) => { e.currentTarget.style.opacity = '1'; dragId.current = null; },
+                    onDragOver:  (e) => { e.preventDefault(); if (dragType.current === 'noteFolder') e.currentTarget.style.background = '#f0fdfa'; },
+                    onDragLeave: (e) => { e.currentTarget.style.background = ''; },
+                    onDrop:      (e) => { e.preventDefault(); e.currentTarget.style.background = ''; if (dragId.current && dragId.current !== folder.id && dragType.current === 'noteFolder') reorder('noteFolder', sortedNoteFolders, dragId.current, folder.id); dragId.current = null; },
+                    style: { display: 'flex', alignItems: 'center', padding: '6px 14px 3px', fontSize: 12, fontWeight: 600, color: '#64748b', userSelect: 'none', gap: 2, borderTop: '1px solid #f1f5f9' }
+                  },
+                    h('span', { style: { cursor: 'grab', color: '#cbd5e1', fontSize: 12, userSelect: 'none', marginRight: 1 } }, '⠿'),
                     h('span', { onClick: () => toggleFolder(folder.id), style: { cursor: 'pointer', marginRight: 2, fontSize: 10 } }, collapsed ? '▶' : '▼'),
                     h('span', { onClick: () => toggleFolder(folder.id), style: { cursor: 'pointer', flex: 1 } }, `📁 ${folder.name} (${fns.length})`),
+                    h('span', { onClick: (e) => { e.stopPropagation(); toggleNoteFolderPin(folder.id, folder.pinned); },
+                      style: { cursor: 'pointer', fontSize: 11, opacity: folder.pinned ? 1 : 0.25, color: folder.pinned ? '#0d9488' : '#64748b', padding: '0 3px' }, title: folder.pinned ? '取消釘選' : '釘選' }, '📌'),
                     h('span', { onClick: () => renameNoteFolder(folder.id, folder.name), style: { cursor: 'pointer', opacity: 0.45, padding: '0 3px' } }, '✏️'),
                     h('span', { onClick: () => { if (window.confirm(`刪除「${folder.name}」？筆記移到未分類`)) deleteNoteFolder(folder.id); }, style: { cursor: 'pointer', opacity: 0.45, padding: '0 3px' } }, '🗑')
                   ),
