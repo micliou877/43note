@@ -1353,36 +1353,68 @@ function App() {
     const dateStr = activeNote.updated?.toDate
       ? activeNote.updated.toDate().toLocaleString('zh-TW') : '';
     const esc = (s) => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    const imgUrls = await Promise.all(noteImages.map(renderImageToDataUrl));
-    const imagesHtml = imgUrls.map(url =>
-      `<img src="${url}" style="max-width:100%;border-radius:8px;display:block;margin-bottom:14px">`
-    ).join('');
 
+    // 立刻同步建立覆蓋層（讓 iOS 之後的列印按鈕點擊算使用者手勢）
     const overlay = document.createElement('div');
     overlay.id = 'pdf-overlay';
-    overlay.innerHTML =
-      `<h1 style="font-size:22px;margin:0 0 4px">${esc(title)}</h1>` +
-      (dateStr ? `<p style="font-size:12px;color:#94a3b8;margin:0 0 20px">${dateStr}</p>` : '') +
-      `<div class="note-body" style="font-size:14.5px;line-height:1.75">${bodyHtml}</div>` +
-      (imgUrls.length ? `<div style="margin-top:20px">${imagesHtml}</div>` : '');
+    overlay.style.cssText = 'position:fixed;inset:0;background:#fff;z-index:9998;overflow-y:auto;padding:56px 20px 20px;font-family:-apple-system,"PingFang TC",sans-serif;color:#1f2937';
+
+    const bar = document.createElement('div');
+    bar.style.cssText = 'position:fixed;top:0;left:0;right:0;padding:9px 14px;background:#fff;border-bottom:1px solid #e5e7eb;display:flex;gap:8px;align-items:center;z-index:9999;box-shadow:0 2px 6px rgba(0,0,0,.06)';
+
+    const printBtn = document.createElement('button');
+    printBtn.textContent = '🖨️ 列印';
+    printBtn.disabled = true;
+    printBtn.style.cssText = 'padding:7px 16px;background:#0d9488;color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer;opacity:.5';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = '✕ 取消';
+    cancelBtn.style.cssText = 'padding:7px 14px;background:#f1f5f9;color:#374151;border:none;border-radius:8px;font-size:14px;cursor:pointer';
+
+    const loading = document.createElement('span');
+    loading.textContent = '準備中…';
+    loading.style.cssText = 'font-size:13px;color:#94a3b8';
+
+    bar.append(printBtn, cancelBtn, loading);
+    overlay.appendChild(bar);
     document.body.appendChild(overlay);
 
     const printStyle = document.createElement('style');
     printStyle.textContent =
       `@page{margin:0;size:A4}` +
       `@media print{body>*:not(#pdf-overlay){display:none!important}` +
-      `#pdf-overlay{display:block!important;padding:12mm 18mm;font-family:-apple-system,"PingFang TC",sans-serif;color:#1f2937}}`;
+      `#pdf-overlay{position:static!important;padding:12mm 18mm!important;overflow:visible!important}` +
+      `#pdf-overlay>div:first-child{display:none!important}}`;
     document.head.appendChild(printStyle);
 
     const origTitle = document.title;
     document.title = title;
-    const cleanup = () => {
-      document.title = origTitle;
-      overlay.remove();
-      printStyle.remove();
-    };
-    window.addEventListener('afterprint', cleanup, { once: true });
-    setTimeout(() => window.print(), 200);
+    const cleanup = () => { document.title = origTitle; overlay.remove(); printStyle.remove(); };
+    cancelBtn.addEventListener('click', cleanup);
+
+    // 非同步載入圖片
+    const imgUrls = await Promise.all(noteImages.map(renderImageToDataUrl));
+    const imagesHtml = imgUrls.map(url =>
+      `<img src="${url}" style="max-width:100%;border-radius:8px;display:block;margin-bottom:14px">`
+    ).join('');
+
+    const content = document.createElement('div');
+    content.innerHTML =
+      `<h1 style="font-size:22px;margin:0 0 4px">${esc(title)}</h1>` +
+      (dateStr ? `<p style="font-size:12px;color:#94a3b8;margin:0 0 20px">${dateStr}</p>` : '') +
+      `<div class="note-body" style="font-size:14.5px;line-height:1.75">${bodyHtml}</div>` +
+      (imgUrls.length ? `<div style="margin-top:20px">${imagesHtml}</div>` : '');
+    overlay.appendChild(content);
+
+    loading.textContent = '點列印即可匯出';
+    printBtn.disabled = false;
+    printBtn.style.opacity = '1';
+
+    // 使用者點列印按鈕 → 此時是真實使用者手勢，iOS 不會攔截
+    printBtn.addEventListener('click', () => {
+      window.addEventListener('afterprint', cleanup, { once: true });
+      window.print();
+    });
   };
 
   const applyListItem = (cls, prefix) => {
