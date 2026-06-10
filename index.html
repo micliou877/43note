@@ -1003,7 +1003,7 @@ function ProjectItem({ project, isActive, hasOverdue, onClick, onRename, onDelet
       setEditing(false);
     };
     return h('div', { style: { ...S.projItem, ...overdueStyle } },
-      h('span', null, '📁'),
+      h('span', null, '📋'),
       h('input', {
         autoFocus: true, value: val,
         onChange: (e) => setVal(e.target.value),
@@ -1016,7 +1016,7 @@ function ProjectItem({ project, isActive, hasOverdue, onClick, onRename, onDelet
 
   return h('div', { onClick, ...dragHandlers, style: { ...S.projItem, ...overdueStyle, cursor: 'default' } },
     h('span', { style: { cursor: 'grab', color: hasOverdue ? '#9f1239' : '#cbd5e1', fontSize: 12, marginRight: 2, userSelect: 'none' } }, '⠿'),
-    h('span', null, hasOverdue ? '🔴' : '📁'),
+    h('span', null, hasOverdue ? '🔴' : '📋'),
     h('span', { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: hasOverdue ? 600 : 400 } }, project.name),
     confirmingDelete
       ? h('span', { style: { display: "flex", gap: 8 } },
@@ -1964,7 +1964,7 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
         ...sortedProjectFolders.map(folder => {
           const fps = activeProjects.filter(p => p.folderId === folder.id);
           const collapsed = collapsedFolders.has(folder.id);
-          return h('div', { key: `pf-${folder.id}` },
+          return h('div', { key: `pf-${folder.id}`, style: { background: '#f0fdfa', borderRadius: 6, marginBottom: 4, overflow: 'hidden' } },
             h('div', {
               draggable: true,
               onDragStart: (e) => { dragId.current = folder.id; dragType.current = 'projectFolder'; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.style.opacity = '0.5'; },
@@ -1983,7 +1983,7 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
                     onBlur: doSaveFolderRename, onClick: e => e.stopPropagation(),
                     style: { flex: 1, border: '1px solid #0d9488', borderRadius: 4, padding: '2px 6px', fontSize: 12, outline: 'none' } })]
                 : [
-                    h('span', { onClick: () => toggleFolder(folder.id), style: { cursor: 'pointer', flex: 1 } }, `📁 ${folder.name} (${fps.length})`),
+                    h('span', { onClick: () => toggleFolder(folder.id), style: { cursor: 'pointer', flex: 1 } }, `🗂️ ${folder.name} (${fps.length})`),
                     h('span', { onClick: (e) => { e.stopPropagation(); toggleProjectFolderPin(folder.id, folder.pinned); },
                       style: { cursor: 'pointer', fontSize: 11, opacity: folder.pinned ? 1 : 0.25, color: folder.pinned ? '#0d9488' : '#64748b', padding: '0 3px' }, title: folder.pinned ? '取消釘選' : '釘選' }, '📌'),
                     h('span', { onClick: (e) => { e.stopPropagation(); renameProjectFolder(folder.id, folder.name); }, style: { cursor: 'pointer', opacity: 0.45, padding: '0 3px' }, title: '改名' }, '✏️'),
@@ -2219,7 +2219,7 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
               ...sortedNoteFolders.map(folder => {
                 const fns = filtered.filter(n => n.folderId === folder.id);
                 const collapsed = collapsedFolders.has(folder.id);
-                return h('div', { key: `nf-${folder.id}` },
+                return h('div', { key: `nf-${folder.id}`, style: { background: '#f0fdfa', borderRadius: 6, marginBottom: 4, overflow: 'hidden' } },
                   h('div', {
                     draggable: true,
                     onDragStart: (e) => { dragId.current = folder.id; dragType.current = 'noteFolder'; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.style.opacity = '0.5'; },
@@ -2238,7 +2238,7 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
                           onBlur: doSaveFolderRename, onClick: e => e.stopPropagation(),
                           style: { flex: 1, border: '1px solid #0d9488', borderRadius: 4, padding: '2px 6px', fontSize: 12, outline: 'none' } })]
                       : [
-                          h('span', { onClick: () => toggleFolder(folder.id), style: { cursor: 'pointer', flex: 1 } }, `📁 ${folder.name} (${fns.length})`),
+                          h('span', { onClick: () => toggleFolder(folder.id), style: { cursor: 'pointer', flex: 1 } }, `🗂️ ${folder.name} (${fns.length})`),
                           h('span', { onClick: (e) => { e.stopPropagation(); toggleNoteFolderPin(folder.id, folder.pinned); },
                             style: { cursor: 'pointer', fontSize: 11, opacity: folder.pinned ? 1 : 0.25, color: folder.pinned ? '#0d9488' : '#64748b', padding: '0 3px' }, title: folder.pinned ? '取消釘選' : '釘選' }, '📌'),
                           h('span', { onClick: () => renameNoteFolder(folder.id, folder.name), style: { cursor: 'pointer', opacity: 0.45, padding: '0 3px' } }, '✏️'),
