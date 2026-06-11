@@ -103,6 +103,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
+const BUILD_TIME = "2026/06/11 09:05";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -2079,7 +2080,10 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
           style: { marginLeft: 'auto', background: 'none', border: '1px solid #e5e7eb', borderRadius: 7, cursor: 'pointer', fontSize: 12, padding: '3px 8px', color: '#64748b', fontWeight: 400, lineHeight: 1.5 }
         }, '🔍 搜尋')
       ),
-      latestNoteTime && h('div', { style: { fontSize: 10.5, color: '#94a3b8', fontWeight: 400, marginBottom: 8 } }, '最近更新 ' + fmt(latestNoteTime))
+      h('div', { style: { fontSize: 10.5, color: '#94a3b8', fontWeight: 400, marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 1 } },
+        latestNoteTime && h('span', null, '資料更新 ' + fmt(latestNoteTime)),
+        h('span', null, '程式更新 ' + BUILD_TIME)
+      )
     ),
     !showTrash && (creatingProj
       ? h(NewProjectInput, { onConfirm: createProject, onCancel: () => setCreatingProj(false) })
