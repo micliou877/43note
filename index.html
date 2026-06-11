@@ -105,7 +105,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/06/11 10:07";
+const BUILD_TIME = "2026/06/11 10:12";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1476,6 +1476,12 @@ function App() {
     const tmpDiv = document.createElement('div');
     tmpDiv.innerHTML = bodyRef.current?.innerHTML || '';
     tmpDiv.querySelectorAll('.img-sel').forEach(el => el.classList.remove('img-sel'));
+    // Bake float:left into inline style so PDF renderer doesn't need to resolve the class
+    tmpDiv.querySelectorAll('img[data-inline].img-row').forEach(img => {
+      img.style.float = 'left';
+      if (!img.style.width) img.style.width = '48%';
+      img.style.margin = '3px 1% 8px 0';
+    });
     const bodyHtml = tmpDiv.innerHTML;
     const dateStr = activeNote.updated?.toDate
       ? activeNote.updated.toDate().toLocaleString('zh-TW') : '';
