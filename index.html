@@ -105,7 +105,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/06/11 10:25";
+const BUILD_TIME = "2026/06/11 10:31";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1475,7 +1475,6 @@ function App() {
     // Clone body HTML and strip selection artifacts
     const tmpDiv = document.createElement('div');
     tmpDiv.innerHTML = bodyRef.current?.innerHTML || '';
-    console.log('[PDF debug] raw bodyHtml:', tmpDiv.innerHTML.slice(0, 2000));
     tmpDiv.querySelectorAll('.img-sel').forEach(el => el.classList.remove('img-sel'));
     // Group consecutive img-row images and wrap in flex container (float unreliable in print)
     (() => {
@@ -1500,13 +1499,15 @@ function App() {
           img.style.maxWidth = '100%';
           if (!img.style.width) img.style.width = '48%';
           flex.appendChild(img);
-          if (!par.textContent.trim()) par.remove();
+          if (par !== img && !par.textContent.trim()) par.remove();
         });
         group = [];
       };
       Array.from(tmpDiv.children).forEach(child => {
         if (rowParents.has(child)) group.push(child);
-        else flush();
+        else if (group.length && !child.textContent.trim()) {
+          // empty div between img-row elements — skip, don't break the group
+        } else flush();
       });
       flush();
     })();
