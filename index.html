@@ -63,6 +63,7 @@
   .note-body img[data-inline] { max-width: 100%; border-radius: 6px; cursor: pointer; display: block; margin: 6px 0; }
   .note-body img[data-inline]:hover { outline: 2px solid #0d9488; }
   .note-body img[data-inline].img-sel { outline: 2px solid #0d9488; }
+  .note-body img[data-inline].img-row { display: inline-block !important; vertical-align: top; margin: 3px 3px; max-width: calc(50% - 8px); }
   .note-body .li1 { margin: 3px 0; }
   .note-body .li2 { padding-left: 2em; margin: 3px 0; }
   .note-body .li3 { padding-left: 4em; margin: 3px 0; }
@@ -103,7 +104,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/06/11 09:38";
+const BUILD_TIME = "2026/06/11 09:47";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -2737,6 +2738,14 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
         const img = bodyRef.current?.querySelector(`img[data-inline="${selImg.imgId}"]`);
         if (img) { img.style.width = w; updateNoteFields({ body: bodyRef.current.innerHTML }); setSelImg(s => s ? { ...s, rect: img.getBoundingClientRect() } : s); }
       };
+      const toggleRow = () => {
+        const img = bodyRef.current?.querySelector(`img[data-inline="${selImg.imgId}"]`);
+        if (!img) return;
+        img.classList.toggle('img-row');
+        updateNoteFields({ body: bodyRef.current.innerHTML });
+        setSelImg(s => s ? { ...s, rect: img.getBoundingClientRect() } : s);
+      };
+      const isRow = !!bodyRef.current?.querySelector(`img[data-inline="${selImg.imgId}"]`)?.classList.contains('img-row');
       return h(React.Fragment, null,
         h('div', { onMouseDown: e => e.preventDefault(),
           style: { position: 'fixed', top: Math.max(4, r.top - 40), left: r.left, zIndex: 400,
@@ -2746,6 +2755,11 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
           h('button', { style: btnStyle, onClick: () => setW('25%') }, '小'),
           h('button', { style: btnStyle, onClick: () => setW('50%') }, '中'),
           h('button', { style: btnStyle, onClick: () => setW('100%') }, '大'),
+          h('div', { style: { width: 1, background: '#4b5563', margin: '4px 2px', alignSelf: 'stretch' } }),
+          h('button', {
+            style: { ...btnStyle, color: isRow ? '#fbbf24' : '#94a3b8', background: isRow ? 'rgba(251,191,36,.15)' : 'none', borderRadius: 4 },
+            onClick: toggleRow, title: isRow ? '切換為獨排' : '切換為並排（多張圖片靠在一起）'
+          }, isRow ? '↕ 獨排' : '↔ 並排'),
           h('div', { style: { width: 1, background: '#4b5563', margin: '4px 2px', alignSelf: 'stretch' } }),
           h('button', { style: { ...btnStyle, color: '#5eead4' },
             onClick: () => { setAnnotating({ type: 'inline', imgId: selImg.imgId, src: selImg.src }); clearSelImg(); } }, '✏️ 標注'),
