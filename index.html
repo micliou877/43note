@@ -105,7 +105,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/06/11 10:05";
+const BUILD_TIME = "2026/06/11 10:07";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1472,7 +1472,11 @@ function App() {
     if (!win) { alert('請先允許彈出視窗'); return; }
     win.document.write('<html><body style="font-family:sans-serif;padding:20px;color:#64748b">準備中…</body></html>');
     const title = activeNote.title || '未命名筆記';
-    const bodyHtml = bodyRef.current?.innerHTML || '';
+    // Clone body HTML and strip selection artifacts
+    const tmpDiv = document.createElement('div');
+    tmpDiv.innerHTML = bodyRef.current?.innerHTML || '';
+    tmpDiv.querySelectorAll('.img-sel').forEach(el => el.classList.remove('img-sel'));
+    const bodyHtml = tmpDiv.innerHTML;
     const dateStr = activeNote.updated?.toDate
       ? activeNote.updated.toDate().toLocaleString('zh-TW') : '';
     const esc = (s) => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -1485,17 +1489,20 @@ function App() {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title>
 <style>
-@page{margin:0;size:A4}
-body{font-family:-apple-system,"PingFang TC","Noto Sans TC",sans-serif;max-width:780px;margin:32px auto;padding:0 24px;color:#1f2937;line-height:1.75}
+@page{margin:18mm;size:A4}
+body{font-family:-apple-system,"PingFang TC","Noto Sans TC",sans-serif;max-width:700px;margin:32px auto;padding:0 24px;color:#1f2937;line-height:1.75}
 h1{font-size:22px;margin:0 0 4px}
 .date{font-size:12px;color:#94a3b8;margin-bottom:20px}
 .body{font-size:14.5px}
+.body::after{content:'';display:table;clear:both}
 .li1{margin:3px 0}.li2{padding-left:2em;margin:3px 0}.li3{padding-left:4em;margin:3px 0}
 ul,ol{padding-left:1.5em;margin:4px 0}li{margin:2px 0}
 blockquote{margin:4px 0 4px 1.5em;padding-left:8px;border-left:3px solid #d1d5db;color:#6b7280}
-.photos{margin-top:20px;display:flex;flex-direction:column;gap:14px}
+img[data-inline]{max-width:100%;border-radius:6px;display:block;margin:6px 0}
+img[data-inline].img-row{float:left;margin:3px 1% 8px 0}
+.photos{margin-top:20px;display:flex;flex-direction:column;gap:14px;clear:both}
 .photo img{max-width:100%;border-radius:8px;display:block}
-@media print{body{margin:0;padding:12mm 18mm;max-width:none}}
+@media print{body{margin:0 auto;padding:0;max-width:700px}}
 </style></head><body>
 <h1>${esc(title)}</h1>
 ${dateStr ? `<p class="date">${dateStr}</p>` : ''}
@@ -1503,7 +1510,7 @@ ${dateStr ? `<p class="date">${dateStr}</p>` : ''}
 ${imgUrls.length ? `<div class="photos">${imagesHtml}</div>` : ''}
 <script>
 window.addEventListener('afterprint', function(){ window.close(); });
-window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
+window.onload = function(){ setTimeout(function(){ window.print(); }, 600); };
 <\/script>
 </body></html>`;
     win.document.open();
