@@ -68,6 +68,16 @@
   .note-body .li1 { margin: 3px 0; }
   .note-body .li2 { padding-left: 2em; margin: 3px 0; }
   .note-body .li3 { padding-left: 4em; margin: 3px 0; }
+  .print-only-title { display: none; }
+  @media print {
+    aside, section, .resize-handle, .no-print { display: none !important; }
+    .print-only-title { display: block !important; font-size: 22px; font-weight: 700; color: #1f2937; margin: 0 0 12px; padding: 0; }
+    main { overflow: visible !important; }
+    .note-body { overflow: visible !important; min-height: 0 !important; max-height: none !important; border: none !important; border-radius: 0 !important; }
+    .note-body img[data-inline]:hover, .note-body img[data-inline].img-sel { outline: none !important; }
+    .note-body img[data-inline] { cursor: default !important; break-inside: avoid; }
+    @page { margin: 18mm; size: A4; }
+  }
 </style>
 </head>
 <body>
@@ -105,7 +115,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/06/11 11:08";
+const BUILD_TIME = "2026/06/11 12:01";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1002,7 +1012,7 @@ function ImageCard({ image, index, onAnnotate, onDelete, confirmingDelete, onCon
 
   return h('div', { style: S.imgCard },
     h('canvas', { ref: canvasRef, style: { ...S.thumb, cursor: 'zoom-in' }, onClick: onView }),
-    h('div', { style: S.imgActions },
+    h('div', { className: 'no-print', style: S.imgActions },
       h('button', { onClick: onAnnotate, style: S.imgActBtn }, '🎨 標註'),
       h('button', { onClick: onRotateLeft, title: '向左旋轉', style: S.imgActBtn }, '↺'),
       h('button', { onClick: onRotateRight, title: '向右旋轉', style: S.imgActBtn }, '↻'),
@@ -1466,90 +1476,7 @@ function App() {
       setTimeout(() => setCopyFeedback(false), 1800);
     });
   };
-  const exportToPDF = async () => {
-    if (!activeNote) return;
-    const win = window.open('', '_blank');
-    if (!win) { alert('請先允許彈出視窗'); return; }
-    win.document.write('<html><body style="font-family:sans-serif;padding:20px;color:#64748b">準備中…</body></html>');
-    const title = activeNote.title || '未命名筆記';
-    // Clone body HTML and strip selection artifacts
-    const tmpDiv = document.createElement('div');
-    tmpDiv.innerHTML = bodyRef.current?.innerHTML || '';
-    tmpDiv.querySelectorAll('.img-sel').forEach(el => el.classList.remove('img-sel'));
-    // Consecutive img-row images → flex container (no float, so text never wraps around images)
-    (() => {
-      const rowParents = new Map();
-      tmpDiv.querySelectorAll('img[data-inline].img-row').forEach(img => {
-        let top = img;
-        while (top.parentElement && top.parentElement !== tmpDiv) top = top.parentElement;
-        if (!rowParents.has(top)) rowParents.set(top, img);
-      });
-      if (!rowParents.size) return;
-      let group = [];
-      const flush = () => {
-        if (!group.length) return;
-        const flex = document.createElement('div');
-        flex.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 10px;align-items:flex-start';
-        tmpDiv.insertBefore(flex, group[0]);
-        group.forEach(par => {
-          const img = rowParents.get(par);
-          img.style.float = '';
-          img.style.margin = '0';
-          img.style.display = 'block';
-          if (!img.style.width) img.style.width = '48%';
-          flex.appendChild(img);
-          if (par !== img && !par.textContent.trim()) par.remove();
-        });
-        group = [];
-      };
-      Array.from(tmpDiv.children).forEach(child => {
-        if (rowParents.has(child)) group.push(child);
-        else if (group.length && !child.textContent.trim()) {
-          // empty div between img-row images — skip, don't break the group
-        } else flush();
-      });
-      flush();
-    })();
-    const bodyHtml = tmpDiv.innerHTML;
-    const dateStr = activeNote.updated?.toDate
-      ? activeNote.updated.toDate().toLocaleString('zh-TW') : '';
-    const esc = (s) => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    const imgUrls = await Promise.all(noteImages.map(renderImageToDataUrl));
-    const imagesHtml = imgUrls.map(url =>
-      `<div class="photo"><img src="${url}"></div>`
-    ).join('');
-    const html = `<!DOCTYPE html><html><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${title}</title>
-<style>
-@page{margin:18mm;size:A4}
-body{font-family:-apple-system,"PingFang TC","Noto Sans TC",sans-serif;max-width:700px;margin:32px auto;padding:0 24px;color:#1f2937;line-height:1.75}
-h1{font-size:22px;margin:0 0 4px}
-.date{font-size:12px;color:#94a3b8;margin-bottom:20px}
-.body{font-size:14.5px;overflow:hidden}
-.body::after{content:'';display:table;clear:both}
-.li1{margin:3px 0}.li2{padding-left:2em;margin:3px 0}.li3{padding-left:4em;margin:3px 0}
-ul,ol{padding-left:1.5em;margin:4px 0}li{margin:2px 0}
-blockquote{margin:4px 0 4px 1.5em;padding-left:8px;border-left:3px solid #d1d5db;color:#6b7280}
-img[data-inline]{max-width:100%;border-radius:6px;display:block;margin:6px 0}
-.photos{margin-top:20px;display:flex;flex-direction:column;gap:14px}
-.photo img{max-width:100%;border-radius:8px;display:block}
-@media print{body{margin:0 auto;padding:0;max-width:700px}img[data-inline]{break-inside:avoid}}
-</style></head><body>
-<h1>${esc(title)}</h1>
-${dateStr ? `<p class="date">${dateStr}</p>` : ''}
-<div class="body">${bodyHtml}</div>
-${imgUrls.length ? `<div class="photos">${imagesHtml}</div>` : ''}
-<script>
-window.addEventListener('afterprint', function(){ window.close(); });
-window.onload = function(){ setTimeout(function(){ window.print(); }, 600); };
-<\/script>
-</body></html>`;
-    win.document.open();
-    win.document.write(html);
-    win.document.close();
-  };
+  const exportToPDF = () => window.print();
 
   const applyListItem = (cls, prefix) => {
     const body = bodyRef.current; if (!body) return; body.focus();
@@ -1998,6 +1925,7 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 600); };
   })() : [];
 
   const globalSearchModal = globalSearchOpen && h('div', {
+    className: 'no-print',
     style: { position: 'fixed', inset: 0, background: 'rgba(15,23,42,.72)', zIndex: 500, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '10vh 20px 20px' },
     onClick: (e) => e.target === e.currentTarget && setGlobalSearchOpen(false)
   },
@@ -2573,7 +2501,7 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 600); };
             h('div', { style: { fontSize: 48 } }, '📝'), h('p', null, '選擇左側筆記，或建立新筆記'))
         : h('div', { style: S.editor },
             // 👇 這是優化防擠壓，且使用原生 Label 的工具列
-            h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12, paddingBottom: 16, marginBottom: 12, borderBottom: '1px solid #f1f5f9' } },
+            h('div', { className: 'no-print', style: { display: 'flex', flexDirection: 'column', gap: 12, paddingBottom: 16, marginBottom: 12, borderBottom: '1px solid #f1f5f9' } },
               h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, width: '100%' } },
                 h('button', { className: 'mobile-only', onClick: () => setMobileView('list'), style: { background: 'none', border: 'none', fontSize: 28, padding: '0 8px 0 0', cursor: 'pointer', color: '#64748b' } }, '‹'),
                 h('input', { value: activeNote.title || '', onChange: (e) => updateNoteFields({ title: e.target.value }), placeholder: '筆記標題', style: { ...S.titleInput, width: '100%', minWidth: 0 } })
@@ -2597,7 +2525,7 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 600); };
                   : h('button', { onClick: () => setConfirmDel({ type: "note", id: activeNote.id }), style: S.dangerBtn }, '🗑')
               )
             ),
-            h('div', { style: S.editorDate },
+            h('div', { className: 'no-print', style: S.editorDate },
               h('span', { style: { color: saveStatus === 'unsaved' ? '#f59e0b' : saveStatus === 'saving' ? '#64748b' : '#9ca3af' } },
                 saveStatus === 'unsaved' ? '● 未儲存（停止輸入 2 秒後自動存）' :
                 saveStatus === 'saving'  ? '儲存中…' :
@@ -2608,7 +2536,8 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 600); };
                 `${(noteSize / 1024).toFixed(0)} KB / 1 MB (${sizePct}%)`)
             ),
             h('div', null,
-              h('div', { style: { ...S.fmtBar, justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 10, boxShadow: '0 2px 4px rgba(0,0,0,0.06)' } },
+              h('h1', { className: 'print-only-title' }, activeNote.title || '未命名筆記'),
+              h('div', { className: 'no-print', style: { ...S.fmtBar, justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 10, boxShadow: '0 2px 4px rgba(0,0,0,0.06)' } },
                 h('div', { style: { display: 'flex', gap: 3, alignItems: 'center', flexWrap: 'wrap' } },
                   h('button', { onMouseDown: (e) => { e.preventDefault(); document.execCommand('bold'); bodyRef.current?.focus(); },
                     style: { ...S.fmtBtn, fontWeight: 700 }, title: '粗體 (Ctrl+B)' }, 'B'),
@@ -2799,7 +2728,7 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 600); };
       };
       const isRow = !!bodyRef.current?.querySelector(`img[data-inline="${selImg.imgId}"]`)?.classList.contains('img-row');
       return h(React.Fragment, null,
-        h('div', { onMouseDown: e => e.preventDefault(),
+        h('div', { className: 'no-print', onMouseDown: e => e.preventDefault(),
           style: { position: 'fixed', top: Math.max(4, r.top - 40), left: r.left, zIndex: 400,
             background: '#1f2937', borderRadius: 6, padding: '2px 4px', display: 'flex', alignItems: 'center', gap: 1,
             boxShadow: '0 2px 8px rgba(0,0,0,0.4)', whiteSpace: 'nowrap' } },
@@ -2818,7 +2747,7 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 600); };
           h('button', { style: { ...btnStyle, color: '#fca5a5' },
             onClick: () => { deleteInlineImg(selImg.imgId); clearSelImg(); } }, '🗑'),
         ),
-        h('div', { onMouseDown: startImgResize,
+        h('div', { className: 'no-print', onMouseDown: startImgResize,
           style: { position: 'fixed', left: r.right - 8, top: r.bottom - 8, width: 14, height: 14,
             background: '#0d9488', border: '2px solid #fff', borderRadius: 2, cursor: 'se-resize', zIndex: 401 } })
       );
