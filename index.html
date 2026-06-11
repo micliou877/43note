@@ -115,7 +115,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/06/11 12:09";
+const BUILD_TIME = "2026/06/11 15:40";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -566,6 +566,15 @@ function renderStrokesScaled(ctx, strokes, ratio) {
       ctx.lineTo(x1 - head * Math.cos(ang - Math.PI/6), y1 - head * Math.sin(ang - Math.PI/6));
       ctx.lineTo(x1 - head * Math.cos(ang + Math.PI/6), y1 - head * Math.sin(ang + Math.PI/6));
       ctx.closePath(); ctx.fill();
+    } else if (s.type === 'ellipse') {
+      const rx = Math.abs(s.x1 - s.x0) / 2 * ratio, ry = Math.abs(s.y1 - s.y0) / 2 * ratio;
+      if (rx > 0.5 && ry > 0.5) { ctx.beginPath(); ctx.ellipse((s.x0+s.x1)/2*ratio, (s.y0+s.y1)/2*ratio, rx, ry, 0, 0, Math.PI*2); ctx.stroke(); }
+    } else if (s.type === 'line') {
+      ctx.beginPath(); ctx.moveTo(s.x0*ratio, s.y0*ratio); ctx.lineTo(s.x1*ratio, s.y1*ratio); ctx.stroke();
+    } else if (s.type === 'highlight') {
+      ctx.save(); ctx.globalAlpha = 0.38; ctx.fillStyle = s.color;
+      ctx.fillRect(Math.min(s.x0,s.x1)*ratio, Math.min(s.y0,s.y1)*ratio, Math.abs(s.x1-s.x0)*ratio, Math.abs(s.y1-s.y0)*ratio);
+      ctx.restore();
     } else if (s.type === 'text') {
       ctx.font = `${s.size * ratio}px -apple-system,"PingFang TC",sans-serif`;
       ctx.textBaseline = 'top';
@@ -663,6 +672,15 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
       ctx.lineTo(s.x1 - head * Math.cos(ang - Math.PI / 6), s.y1 - head * Math.sin(ang - Math.PI / 6));
       ctx.lineTo(s.x1 - head * Math.cos(ang + Math.PI / 6), s.y1 - head * Math.sin(ang + Math.PI / 6));
       ctx.closePath(); ctx.fill();
+    } else if (s.type === "ellipse") {
+      const rx = Math.abs(s.x1 - s.x0) / 2, ry = Math.abs(s.y1 - s.y0) / 2;
+      if (rx > 0.5 && ry > 0.5) { ctx.beginPath(); ctx.ellipse((s.x0+s.x1)/2, (s.y0+s.y1)/2, rx, ry, 0, 0, Math.PI*2); ctx.stroke(); }
+    } else if (s.type === "line") {
+      ctx.beginPath(); ctx.moveTo(s.x0, s.y0); ctx.lineTo(s.x1, s.y1); ctx.stroke();
+    } else if (s.type === "highlight") {
+      ctx.save(); ctx.globalAlpha = 0.38; ctx.fillStyle = s.color;
+      ctx.fillRect(Math.min(s.x0,s.x1), Math.min(s.y0,s.y1), Math.abs(s.x1-s.x0), Math.abs(s.y1-s.y0));
+      ctx.restore();
     } else if (s.type === "text") {
       ctx.font = `${s.size}px -apple-system, "PingFang TC", sans-serif`;
       ctx.textBaseline = "top";
@@ -785,8 +803,11 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
 
   const tools = [
     { id: "pen", icon: "✏️", label: "畫筆" },
+    { id: "line", icon: "╱", label: "直線" },
     { id: "arrow", icon: "↗", label: "箭頭" },
     { id: "rect", icon: "▢", label: "方框" },
+    { id: "ellipse", icon: "○", label: "橢圓" },
+    { id: "highlight", icon: "▓", label: "螢光標記" },
     { id: "text", icon: "T", label: "文字" },
     { id: "erase", icon: "🧽", label: "橡皮擦" },
   ];
@@ -894,6 +915,15 @@ function Lightbox({ image, onClose }) {
           ctx.lineTo(x1 - head * Math.cos(ang - Math.PI / 6), y1 - head * Math.sin(ang - Math.PI / 6));
           ctx.lineTo(x1 - head * Math.cos(ang + Math.PI / 6), y1 - head * Math.sin(ang + Math.PI / 6));
           ctx.closePath(); ctx.fill();
+        } else if (s.type === 'ellipse') {
+          const rx = Math.abs(s.x1 - s.x0) / 2 * ratio, ry = Math.abs(s.y1 - s.y0) / 2 * ratio;
+          if (rx > 0.5 && ry > 0.5) { ctx.beginPath(); ctx.ellipse((s.x0+s.x1)/2*ratio, (s.y0+s.y1)/2*ratio, rx, ry, 0, 0, Math.PI*2); ctx.stroke(); }
+        } else if (s.type === 'line') {
+          ctx.beginPath(); ctx.moveTo(s.x0*ratio, s.y0*ratio); ctx.lineTo(s.x1*ratio, s.y1*ratio); ctx.stroke();
+        } else if (s.type === 'highlight') {
+          ctx.save(); ctx.globalAlpha = 0.38; ctx.fillStyle = s.color;
+          ctx.fillRect(Math.min(s.x0,s.x1)*ratio, Math.min(s.y0,s.y1)*ratio, Math.abs(s.x1-s.x0)*ratio, Math.abs(s.y1-s.y0)*ratio);
+          ctx.restore();
         } else if (s.type === 'text') {
           ctx.font = `${s.size * ratio}px -apple-system, "PingFang TC", sans-serif`;
           ctx.textBaseline = 'top';
@@ -1000,6 +1030,15 @@ function ImageCard({ image, index, onAnnotate, onDelete, confirmingDelete, onCon
           ctx.lineTo(x1 - head * Math.cos(ang - Math.PI / 6), y1 - head * Math.sin(ang - Math.PI / 6));
           ctx.lineTo(x1 - head * Math.cos(ang + Math.PI / 6), y1 - head * Math.sin(ang + Math.PI / 6));
           ctx.closePath(); ctx.fill();
+        } else if (s.type === 'ellipse') {
+          const rx = Math.abs(s.x1 - s.x0) / 2 * ratio, ry = Math.abs(s.y1 - s.y0) / 2 * ratio;
+          if (rx > 0.5 && ry > 0.5) { ctx.beginPath(); ctx.ellipse((s.x0+s.x1)/2*ratio, (s.y0+s.y1)/2*ratio, rx, ry, 0, 0, Math.PI*2); ctx.stroke(); }
+        } else if (s.type === 'line') {
+          ctx.beginPath(); ctx.moveTo(s.x0*ratio, s.y0*ratio); ctx.lineTo(s.x1*ratio, s.y1*ratio); ctx.stroke();
+        } else if (s.type === 'highlight') {
+          ctx.save(); ctx.globalAlpha = 0.38; ctx.fillStyle = s.color;
+          ctx.fillRect(Math.min(s.x0,s.x1)*ratio, Math.min(s.y0,s.y1)*ratio, Math.abs(s.x1-s.x0)*ratio, Math.abs(s.y1-s.y0)*ratio);
+          ctx.restore();
         } else if (s.type === 'text') {
           ctx.font = `${s.size * ratio}px -apple-system, "PingFang TC", sans-serif`;
           ctx.textBaseline = 'top';
@@ -1156,6 +1195,7 @@ function App() {
   const bodyRef            = useRef(null);
   const [canBodyUndo, setCanBodyUndo] = useState(false);
   const [fontColor, setFontColor] = useState('#111827');
+  const [bodyFontSize, setBodyFontSize] = useState(() => parseFloat(localStorage.getItem('bodyFontSize') || '14.5'));
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [noteImages, setNoteImages] = useState([]);
   const [latestNoteTime, setLatestNoteTime] = useState(null);
@@ -2553,6 +2593,10 @@ function App() {
                   h('button', { onMouseDown: (e) => { e.preventDefault(); document.execCommand('strikeThrough'); bodyRef.current?.focus(); },
                     style: { ...S.fmtBtn, textDecoration: 'line-through', fontSize: 12 }, title: '刪除線' }, 'S'),
                   h('div', { style: S.fmtDivider }),
+                  h('button', { onMouseDown: (e) => { e.preventDefault(); setBodyFontSize(s => { const n = Math.max(11, s - 1); localStorage.setItem('bodyFontSize', n); return n; }); }, style: { ...S.fmtBtn, fontWeight: 600 }, title: '縮小字體' }, 'A-'),
+                  h('span', { style: { fontSize: 11, color: '#94a3b8', minWidth: 30, textAlign: 'center', userSelect: 'none', lineHeight: '26px' } }, `${bodyFontSize}px`),
+                  h('button', { onMouseDown: (e) => { e.preventDefault(); setBodyFontSize(s => { const n = Math.min(28, s + 1); localStorage.setItem('bodyFontSize', n); return n; }); }, style: { ...S.fmtBtn, fontWeight: 600 }, title: '放大字體' }, 'A+'),
+                  h('div', { style: S.fmtDivider }),
                   h('span', { style: { fontSize: 11, color: '#94a3b8', userSelect: 'none' } }, '顏色'),
                   ...['#111827','#dc2626','#d97706','#059669','#2563eb','#7c3aed','#db2777'].map(c =>
                     h('button', { key: c,
@@ -2688,7 +2732,7 @@ function App() {
                     updateNoteFields({ body: bodyRef.current.innerHTML }); return;
                   }
                 },
-                style: { ...S.bodyArea, borderRadius: '0 0 10px 10px', borderTop: 'none',
+                style: { ...S.bodyArea, fontSize: bodyFontSize, borderRadius: '0 0 10px 10px', borderTop: 'none',
                   minHeight: bodyExpanded ? 'calc(100vh - 340px)' : 150, overflow: 'auto', resize: 'none' }
               })
             ),
