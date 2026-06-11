@@ -9,11 +9,34 @@
 <link rel="icon" href="icon.svg" type="image/svg+xml" />
 <link rel="apple-touch-icon" href="icon.svg" />
 <link rel="manifest" href="manifest.json" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet">
 <title>照片筆記</title>
 <style>
   * { box-sizing: border-box; }
-  body { margin: 0; font-family: -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif; }
+  body { margin: 0; font-family: "Noto Sans TC", -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif; }
   input, textarea, button { font-family: inherit; }
+
+  /* 按鈕互動回饋 */
+  button:not([disabled]) { transition: filter 0.15s ease, transform 0.1s ease; }
+  button:not([disabled]):hover { filter: brightness(0.88); }
+  button:not([disabled]):active { transform: scale(0.97); }
+  button:focus-visible { outline: 2px solid #0d9488; outline-offset: 2px; }
+
+  /* Input / Select focus */
+  input:not([type="range"]):not([type="file"]), textarea, select {
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  input:not([type="range"]):not([type="file"]):focus,
+  textarea:focus, select:focus {
+    border-color: #0d9488 !important;
+    box-shadow: 0 0 0 3px rgba(13,148,136,.12) !important;
+    outline: none;
+  }
+
+  /* 捲動平滑 */
+  html { scroll-behavior: smooth; }
   textarea::-webkit-scrollbar { width: 8px; }
   textarea::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
 
@@ -188,7 +211,7 @@ function estimateNoteSize(note) {
 }
 
 const S = {
-  app: { display: "flex", height: "100vh", background: "#f8fafc", color: "#1f2937", fontSize: 14 },
+  app: { display: "flex", height: "100dvh", background: "#f8fafc", color: "#1f2937", fontSize: 14 },
   sidebar: { width: 230, flexShrink: 0, background: "#fff", borderRight: "1px solid #e5e7eb", display: "flex", flexDirection: "column", padding: 14 },
   brand: { display: "flex", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 16, marginBottom: 16, color: "#0f172a" },
   newProjBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px", background: "#0d9488", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: 13 },
@@ -297,8 +320,8 @@ function Login() {
   };
 
   const L = {
-    wrap: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', padding: 20 },
-    card: { background: '#fff', padding: '40px 32px', borderRadius: 14, boxShadow: '0 4px 20px rgba(0,0,0,.06)', width: '100%', maxWidth: 380 },
+    wrap: { minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', padding: 20 },
+    card: { background: '#fff', padding: '40px 32px', borderRadius: 14, boxShadow: '0 4px 24px rgba(13,148,136,.10)', width: '100%', maxWidth: 380 },
     title: { textAlign: 'center', fontSize: 24, margin: '0 0 6px', color: '#0f172a' },
     sub: { textAlign: 'center', fontSize: 13, color: '#64748b', marginBottom: 24, marginTop: 0 },
     googleBtn: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, width: '100%', padding: '11px', background: '#fff', color: '#334155', border: '1px solid #d1d5db', borderRadius: 10, cursor: 'pointer', fontSize: 14, fontWeight: 500 },
