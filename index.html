@@ -63,7 +63,8 @@
   .note-body img[data-inline] { max-width: 100%; border-radius: 6px; cursor: pointer; display: block; margin: 6px 0; }
   .note-body img[data-inline]:hover { outline: 2px solid #0d9488; }
   .note-body img[data-inline].img-sel { outline: 2px solid #0d9488; }
-  .note-body img[data-inline].img-row { display: inline-block !important; vertical-align: top; margin: 3px 3px; max-width: calc(50% - 8px); }
+  .note-body { overflow: hidden; }
+  .note-body img[data-inline].img-row { float: left !important; width: 48% !important; margin: 3px 1% 8px 0 !important; display: block !important; }
   .note-body .li1 { margin: 3px 0; }
   .note-body .li2 { padding-left: 2em; margin: 3px 0; }
   .note-body .li3 { padding-left: 4em; margin: 3px 0; }
@@ -104,7 +105,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/06/11 09:47";
+const BUILD_TIME = "2026/06/11 09:56";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -2738,10 +2739,17 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
         const img = bodyRef.current?.querySelector(`img[data-inline="${selImg.imgId}"]`);
         if (img) { img.style.width = w; updateNoteFields({ body: bodyRef.current.innerHTML }); setSelImg(s => s ? { ...s, rect: img.getBoundingClientRect() } : s); }
       };
-      const toggleRow = () => {
+      const toggleRow = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         const img = bodyRef.current?.querySelector(`img[data-inline="${selImg.imgId}"]`);
         if (!img) return;
-        img.classList.toggle('img-row');
+        const currently = img.classList.contains('img-row');
+        if (currently) {
+          img.classList.remove('img-row');
+        } else {
+          img.classList.add('img-row');
+        }
         updateNoteFields({ body: bodyRef.current.innerHTML });
         setSelImg(s => s ? { ...s, rect: img.getBoundingClientRect() } : s);
       };
@@ -2757,8 +2765,8 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
           h('button', { style: btnStyle, onClick: () => setW('100%') }, '大'),
           h('div', { style: { width: 1, background: '#4b5563', margin: '4px 2px', alignSelf: 'stretch' } }),
           h('button', {
-            style: { ...btnStyle, color: isRow ? '#fbbf24' : '#94a3b8', background: isRow ? 'rgba(251,191,36,.15)' : 'none', borderRadius: 4 },
-            onClick: toggleRow, title: isRow ? '切換為獨排' : '切換為並排（多張圖片靠在一起）'
+            style: { ...btnStyle, color: isRow ? '#fbbf24' : '#94a3b8', background: isRow ? 'rgba(251,191,36,.2)' : 'none', borderRadius: 4 },
+            onMouseDown: toggleRow, title: isRow ? '切換為獨排' : '切換為並排（多張圖片靠在一起）'
           }, isRow ? '↕ 獨排' : '↔ 並排'),
           h('div', { style: { width: 1, background: '#4b5563', margin: '4px 2px', alignSelf: 'stretch' } }),
           h('button', { style: { ...btnStyle, color: '#5eead4' },
