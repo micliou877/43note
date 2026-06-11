@@ -64,7 +64,7 @@
   .note-body img[data-inline]:hover { outline: 2px solid #0d9488; }
   .note-body img[data-inline].img-sel { outline: 2px solid #0d9488; }
   .note-body { overflow: hidden; }
-  .note-body img[data-inline].img-row { float: left !important; width: 48% !important; margin: 3px 1% 8px 0 !important; display: block !important; }
+  .note-body img[data-inline].img-row { float: left !important; margin: 3px 1% 8px 0 !important; }
   .note-body .li1 { margin: 3px 0; }
   .note-body .li2 { padding-left: 2em; margin: 3px 0; }
   .note-body .li3 { padding-left: 4em; margin: 3px 0; }
@@ -105,7 +105,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/06/11 09:56";
+const BUILD_TIME = "2026/06/11 09:58";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -2747,8 +2747,12 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
         const currently = img.classList.contains('img-row');
         if (currently) {
           img.classList.remove('img-row');
+          img.style.float = '';
+          img.style.width = '';
+          img.style.margin = '';
         } else {
           img.classList.add('img-row');
+          img.style.width = img.style.width || '48%';
         }
         updateNoteFields({ body: bodyRef.current.innerHTML });
         setSelImg(s => s ? { ...s, rect: img.getBoundingClientRect() } : s);
