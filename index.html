@@ -105,7 +105,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/06/11 10:48";
+const BUILD_TIME = "2026/06/11 10:59";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1493,14 +1493,16 @@ function App() {
 body{font-family:-apple-system,"PingFang TC","Noto Sans TC",sans-serif;max-width:700px;margin:32px auto;padding:0 24px;color:#1f2937;line-height:1.75}
 h1{font-size:22px;margin:0 0 4px}
 .date{font-size:12px;color:#94a3b8;margin-bottom:20px}
-.body{font-size:14.5px}
+.body{font-size:14.5px;overflow:hidden}
+.body::after{content:'';display:table;clear:both}
 .li1{margin:3px 0}.li2{padding-left:2em;margin:3px 0}.li3{padding-left:4em;margin:3px 0}
 ul,ol{padding-left:1.5em;margin:4px 0}li{margin:2px 0}
 blockquote{margin:4px 0 4px 1.5em;padding-left:8px;border-left:3px solid #d1d5db;color:#6b7280}
-img[data-inline]{max-width:100%;border-radius:6px;display:block;float:none;margin:6px 0;break-inside:avoid}
+img[data-inline]{max-width:100%;border-radius:6px;display:block;margin:6px 0}
+img[data-inline].img-row{float:left!important;margin:3px 1% 8px 0!important}
 .photos{margin-top:20px;display:flex;flex-direction:column;gap:14px}
 .photo img{max-width:100%;border-radius:8px;display:block}
-@media print{body{margin:0 auto;padding:0;max-width:700px}}
+@media print{body{margin:0 auto;padding:0;max-width:700px}img[data-inline]{break-inside:avoid}}
 </style></head><body>
 <h1>${esc(title)}</h1>
 ${dateStr ? `<p class="date">${dateStr}</p>` : ''}
