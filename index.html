@@ -90,7 +90,7 @@ import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore, collection, query, orderBy, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, serverTimestamp, writeBatch, getDocs, deleteField } from "firebase/firestore";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore, collection, query, orderBy, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, serverTimestamp, writeBatch, getDocs, deleteField, limit } from "firebase/firestore";
 
 // ════════════════════════════════════════════════════════════════
 const firebaseConfig = {
@@ -1145,6 +1145,10 @@ function App() {
   const [fontColor, setFontColor] = useState('#111827');
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [noteImages, setNoteImages] = useState([]);
+  const [latestNoteTime, setLatestNoteTime] = useState(null);
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
+  const [globalSearchQuery, setGlobalSearchQuery] = useState('');
+  const [allNotesForSearch, setAllNotesForSearch] = useState([]);
 
   useEffect(() => {
     const goOnline = () => setIsOffline(false);
@@ -1270,6 +1274,27 @@ function App() {
       }));
     });
   }, [user]);
+
+  useEffect(() => {
+    if (!user) { setLatestNoteTime(null); return; }
+    const q = query(collection(db, `users/${user.uid}/notes`), where('deleted', '==', false), orderBy('updated', 'desc'), limit(1));
+    return onSnapshot(q, snap => setLatestNoteTime(snap.empty ? null : snap.docs[0].data().updated));
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || !globalSearchOpen) { setAllNotesForSearch([]); return; }
+    const q = query(collection(db, `users/${user.uid}/notes`), where('deleted', '==', false));
+    return onSnapshot(q, snap => setAllNotesForSearch(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+  }, [user, globalSearchOpen]);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); setGlobalSearchOpen(true); setGlobalSearchQuery(''); }
+      if (e.key === 'Escape' && globalSearchOpen) setGlobalSearchOpen(false);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [globalSearchOpen]);
 
   useEffect(() => {
     if (!user || !showTrash) { setAllDeletedNotes([]); setAllDeletedTasks([]); return; }
@@ -1912,6 +1937,69 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
   });
   const filtered = sortedNotes.filter((n) => !search || (n.title || '').includes(search) || stripHtml(n.body || '').includes(search));
 
+  const globalResults = (globalSearchOpen && globalSearchQuery.trim().length >= 1)
+    ? allNotesForSearch.filter(n =>
+        (n.title || '').includes(globalSearchQuery) || stripHtml(n.body || '').includes(globalSearchQuery)
+      ).sort((a, b) => getSafeTime(b.updated) - getSafeTime(a.updated)).slice(0, 50)
+    : [];
+
+  const globalSearchModal = globalSearchOpen && h('div', {
+    style: { position: 'fixed', inset: 0, background: 'rgba(15,23,42,.72)', zIndex: 500, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '10vh 20px 20px' },
+    onClick: (e) => e.target === e.currentTarget && setGlobalSearchOpen(false)
+  },
+    h('div', { style: { background: '#fff', borderRadius: 14, width: '100%', maxWidth: 560, maxHeight: '70vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,.25)' } },
+      h('div', { style: { padding: '14px 16px', borderBottom: '1px solid #f1f5f9' } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 10, padding: '8px 12px' } },
+          h('span', { style: { color: '#94a3b8', fontSize: 15 } }, '🔍'),
+          h('input', {
+            autoFocus: true,
+            value: globalSearchQuery,
+            onChange: (e) => setGlobalSearchQuery(e.target.value),
+            onKeyDown: (e) => { if (e.key === 'Escape') setGlobalSearchOpen(false); },
+            placeholder: '搜尋所有專案的筆記…',
+            style: { flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: 15, color: '#1f2937', boxShadow: 'none' }
+          }),
+          globalSearchQuery && h('button', { onClick: () => setGlobalSearchQuery(''), style: { background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: 15, padding: 0, lineHeight: 1 } }, '✕')
+        )
+      ),
+      h('div', { style: { overflowY: 'auto', flex: 1 } },
+        globalSearchQuery.trim().length < 1
+          ? h('div', { style: { padding: '32px 20px', textAlign: 'center', color: '#94a3b8', fontSize: 13 } }, '輸入關鍵字，搜尋所有專案的筆記')
+          : allNotesForSearch.length === 0
+          ? h('div', { style: { padding: '32px 20px', textAlign: 'center', color: '#94a3b8', fontSize: 13 } }, '載入中…')
+          : globalResults.length === 0
+          ? h('div', { style: { padding: '32px 20px', textAlign: 'center', color: '#94a3b8', fontSize: 13 } }, `找不到符合「${globalSearchQuery}」的筆記`)
+          : globalResults.map(n => {
+              const proj = projects.find(p => p.id === n.projectId);
+              const bodyText = stripHtml(n.body || '');
+              const qi = bodyText.indexOf(globalSearchQuery);
+              const snippet = qi >= 0 ? bodyText.slice(Math.max(0, qi - 20), qi + 60) : bodyText.slice(0, 80);
+              return h('div', {
+                key: n.id,
+                onClick: () => {
+                  saveIfDirtyRef.current?.();
+                  setSaveStatus('idle');
+                  if (proj) { setActiveProject(proj); setTab('notes'); }
+                  setActiveNote(n);
+                  setSearch('');
+                  setMobileView('editor');
+                  setGlobalSearchOpen(false);
+                  clearSelImg();
+                },
+                style: { padding: '13px 18px', borderBottom: '1px solid #f8fafc', cursor: 'pointer' }
+              },
+                h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 } },
+                  h('span', { style: { fontWeight: 600, fontSize: 14, color: '#1f2937', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, n.title || '未命名筆記'),
+                  proj && h('span', { style: { fontSize: 11, color: '#0d9488', background: '#f0fdfa', padding: '2px 8px', borderRadius: 10, flexShrink: 0 } }, proj.name)
+                ),
+                snippet && h('div', { style: { fontSize: 12.5, color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, snippet),
+                h('div', { style: { fontSize: 11, color: '#cbd5e1', marginTop: 4 } }, fmt(n.updated))
+              );
+            })
+      )
+    )
+  );
+
   let noteSize = 0, sizePct = 0;
   if (activeNote) {
     noteSize = estimateNoteSize(activeNote);
@@ -1966,7 +2054,17 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
 
   // 渲染專案列表 (Sidebar)
   const sidebar = h('aside', { className: mobileView === 'sidebar' ? 'mobile-full-width' : 'hide-on-mobile', style: { ...S.sidebar, width: sidebarWidth }, ...swipeHandlers('sidebar') },
-    h('div', { style: S.brand }, '📷 照片筆記'),
+    h('div', { style: { ...S.brand, flexDirection: 'column', alignItems: 'flex-start', gap: 0 } },
+      h('div', { style: { display: 'flex', alignItems: 'center', width: '100%', marginBottom: 2 } },
+        h('span', null, '📷 照片筆記'),
+        h('button', {
+          onClick: () => { setGlobalSearchOpen(true); setGlobalSearchQuery(''); },
+          title: '全站搜尋 (Ctrl+K)',
+          style: { marginLeft: 'auto', background: 'none', border: '1px solid #e5e7eb', borderRadius: 7, cursor: 'pointer', fontSize: 12, padding: '3px 8px', color: '#64748b', fontWeight: 400, lineHeight: 1.5 }
+        }, '🔍 搜尋')
+      ),
+      latestNoteTime && h('div', { style: { fontSize: 10.5, color: '#94a3b8', fontWeight: 400, marginBottom: 8 } }, '最近更新 ' + fmt(latestNoteTime))
+    ),
     !showTrash && (creatingProj
       ? h(NewProjectInput, { onConfirm: createProject, onCancel: () => setCreatingProj(false) })
       : creatingProjFolder
@@ -2112,6 +2210,7 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
       offlineBanner,
       sidebar,
       resizeHandle,
+      globalSearchModal,
       h('main', { className: mobileView === 'list' ? 'mobile-full-width' : 'hide-on-mobile', style: { ...S.editorCol, padding: 24, overflowY: 'auto' }, ...swipeHandlers('trash') },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 } },
           h('button', { className: 'mobile-only', onClick: () => setMobileView('sidebar'), style: { background: 'none', border: 'none', fontSize: 24, padding: '0 8px', cursor: 'pointer', color: '#64748b' } }, '‹'),
@@ -2675,7 +2774,8 @@ window.onload = function(){ setTimeout(function(){ window.print(); }, 400); };
         ),
         h('button', { onClick: () => setFolderMenu(null), style: { ...S.ghostBtn, width: '100%', marginTop: 4 } }, '取消')
       )
-    )
+    ),
+    globalSearchModal
   );
 }
 
