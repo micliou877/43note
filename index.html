@@ -115,7 +115,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/06/11 15:40";
+const BUILD_TIME = "2026/06/11 15:45";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1195,7 +1195,7 @@ function App() {
   const bodyRef            = useRef(null);
   const [canBodyUndo, setCanBodyUndo] = useState(false);
   const [fontColor, setFontColor] = useState('#111827');
-  const [bodyFontSize, setBodyFontSize] = useState(() => parseFloat(localStorage.getItem('bodyFontSize') || '14.5'));
+  const [inlineFontSize, setInlineFontSize] = useState(16);
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [noteImages, setNoteImages] = useState([]);
   const [latestNoteTime, setLatestNoteTime] = useState(null);
@@ -1492,6 +1492,18 @@ function App() {
       sel.addRange(range);
     }
     updateNoteFields({ body: prev });
+  };
+  const applyInlineFontSize = (sizePx) => {
+    const body = bodyRef.current;
+    if (!body) return;
+    document.execCommand('fontSize', false, '7');
+    Array.from(body.querySelectorAll('font[size="7"]')).forEach(el => {
+      const span = document.createElement('span');
+      span.style.fontSize = sizePx + 'px';
+      while (el.firstChild) span.appendChild(el.firstChild);
+      el.parentNode.replaceChild(span, el);
+    });
+    updateNoteFields({ body: body.innerHTML });
   };
   const copyNoteText = () => {
     if (!bodyRef.current) return;
@@ -2593,9 +2605,9 @@ function App() {
                   h('button', { onMouseDown: (e) => { e.preventDefault(); document.execCommand('strikeThrough'); bodyRef.current?.focus(); },
                     style: { ...S.fmtBtn, textDecoration: 'line-through', fontSize: 12 }, title: '刪除線' }, 'S'),
                   h('div', { style: S.fmtDivider }),
-                  h('button', { onMouseDown: (e) => { e.preventDefault(); setBodyFontSize(s => { const n = Math.max(11, s - 1); localStorage.setItem('bodyFontSize', n); return n; }); }, style: { ...S.fmtBtn, fontWeight: 600 }, title: '縮小字體' }, 'A-'),
-                  h('span', { style: { fontSize: 11, color: '#94a3b8', minWidth: 30, textAlign: 'center', userSelect: 'none', lineHeight: '26px' } }, `${bodyFontSize}px`),
-                  h('button', { onMouseDown: (e) => { e.preventDefault(); setBodyFontSize(s => { const n = Math.min(28, s + 1); localStorage.setItem('bodyFontSize', n); return n; }); }, style: { ...S.fmtBtn, fontWeight: 600 }, title: '放大字體' }, 'A+'),
+                  h('button', { onMouseDown: (e) => { e.preventDefault(); const n = Math.max(10, inlineFontSize - 2); setInlineFontSize(n); applyInlineFontSize(n); }, style: { ...S.fmtBtn, fontWeight: 600 }, title: '縮小選取文字' }, 'A-'),
+                  h('span', { style: { fontSize: 11, color: '#94a3b8', minWidth: 30, textAlign: 'center', userSelect: 'none', lineHeight: '26px' } }, `${inlineFontSize}px`),
+                  h('button', { onMouseDown: (e) => { e.preventDefault(); const n = Math.min(48, inlineFontSize + 2); setInlineFontSize(n); applyInlineFontSize(n); }, style: { ...S.fmtBtn, fontWeight: 600 }, title: '放大選取文字' }, 'A+'),
                   h('div', { style: S.fmtDivider }),
                   h('span', { style: { fontSize: 11, color: '#94a3b8', userSelect: 'none' } }, '顏色'),
                   ...['#111827','#dc2626','#d97706','#059669','#2563eb','#7c3aed','#db2777'].map(c =>
@@ -2732,7 +2744,7 @@ function App() {
                     updateNoteFields({ body: bodyRef.current.innerHTML }); return;
                   }
                 },
-                style: { ...S.bodyArea, fontSize: bodyFontSize, borderRadius: '0 0 10px 10px', borderTop: 'none',
+                style: { ...S.bodyArea, borderRadius: '0 0 10px 10px', borderTop: 'none',
                   minHeight: bodyExpanded ? 'calc(100vh - 340px)' : 150, overflow: 'auto', resize: 'none' }
               })
             ),
