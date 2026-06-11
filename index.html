@@ -72,7 +72,11 @@
   @media print {
     aside, section, .resize-handle, .no-print { display: none !important; }
     .print-only-title { display: block !important; font-size: 22px; font-weight: 700; color: #1f2937; margin: 0 0 12px; padding: 0; }
-    main { overflow: visible !important; }
+    /* 解除整條 flex 高度鏈，讓內容自由撐開換頁 */
+    html, body { height: auto !important; }
+    #root > div { height: auto !important; overflow: visible !important; display: block !important; }
+    main { overflow: visible !important; height: auto !important; flex: none !important; display: block !important; }
+    main > div { overflow: visible !important; height: auto !important; flex: none !important; }
     .note-body { overflow: visible !important; min-height: 0 !important; max-height: none !important; border: none !important; border-radius: 0 !important; }
     .note-body img[data-inline]:hover, .note-body img[data-inline].img-sel { outline: none !important; }
     .note-body img[data-inline] { cursor: default !important; break-inside: avoid; }
@@ -115,7 +119,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/06/11 15:45";
+const BUILD_TIME = "2026/06/11 15:57";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
