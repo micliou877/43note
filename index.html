@@ -105,7 +105,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/06/11 10:31";
+const BUILD_TIME = "2026/06/11 10:48";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1476,41 +1476,6 @@ function App() {
     const tmpDiv = document.createElement('div');
     tmpDiv.innerHTML = bodyRef.current?.innerHTML || '';
     tmpDiv.querySelectorAll('.img-sel').forEach(el => el.classList.remove('img-sel'));
-    // Group consecutive img-row images and wrap in flex container (float unreliable in print)
-    (() => {
-      const rowParents = new Map();
-      tmpDiv.querySelectorAll('img[data-inline].img-row').forEach(img => {
-        let top = img;
-        while (top.parentElement && top.parentElement !== tmpDiv) top = top.parentElement;
-        if (!rowParents.has(top)) rowParents.set(top, img);
-      });
-      if (!rowParents.size) return;
-      let group = [];
-      const flush = () => {
-        if (!group.length) return;
-        const flex = document.createElement('div');
-        flex.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 10px;align-items:flex-start';
-        tmpDiv.insertBefore(flex, group[0]);
-        group.forEach(par => {
-          const img = rowParents.get(par);
-          img.style.float = '';
-          img.style.margin = '0';
-          img.style.display = 'block';
-          img.style.maxWidth = '100%';
-          if (!img.style.width) img.style.width = '48%';
-          flex.appendChild(img);
-          if (par !== img && !par.textContent.trim()) par.remove();
-        });
-        group = [];
-      };
-      Array.from(tmpDiv.children).forEach(child => {
-        if (rowParents.has(child)) group.push(child);
-        else if (group.length && !child.textContent.trim()) {
-          // empty div between img-row elements — skip, don't break the group
-        } else flush();
-      });
-      flush();
-    })();
     const bodyHtml = tmpDiv.innerHTML;
     const dateStr = activeNote.updated?.toDate
       ? activeNote.updated.toDate().toLocaleString('zh-TW') : '';
@@ -1529,11 +1494,10 @@ body{font-family:-apple-system,"PingFang TC","Noto Sans TC",sans-serif;max-width
 h1{font-size:22px;margin:0 0 4px}
 .date{font-size:12px;color:#94a3b8;margin-bottom:20px}
 .body{font-size:14.5px}
-.body::after{content:'';display:table;clear:both}
 .li1{margin:3px 0}.li2{padding-left:2em;margin:3px 0}.li3{padding-left:4em;margin:3px 0}
 ul,ol{padding-left:1.5em;margin:4px 0}li{margin:2px 0}
 blockquote{margin:4px 0 4px 1.5em;padding-left:8px;border-left:3px solid #d1d5db;color:#6b7280}
-img[data-inline]{max-width:100%;border-radius:6px;display:block;margin:6px 0}
+img[data-inline]{max-width:100%;border-radius:6px;display:block;float:none;margin:6px 0;break-inside:avoid}
 .photos{margin-top:20px;display:flex;flex-direction:column;gap:14px}
 .photo img{max-width:100%;border-radius:8px;display:block}
 @media print{body{margin:0 auto;padding:0;max-width:700px}}
