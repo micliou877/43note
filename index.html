@@ -115,7 +115,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/06/11 12:01";
+const BUILD_TIME = "2026/06/11 12:09";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1476,7 +1476,12 @@ function App() {
       setTimeout(() => setCopyFeedback(false), 1800);
     });
   };
-  const exportToPDF = () => window.print();
+  const exportToPDF = () => {
+    const prev = document.title;
+    document.title = activeNote?.title || '未命名筆記';
+    window.addEventListener('afterprint', () => { document.title = prev; }, { once: true });
+    window.print();
+  };
 
   const applyListItem = (cls, prefix) => {
     const body = bodyRef.current; if (!body) return; body.focus();
