@@ -119,7 +119,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/06/11 17:03";
+const BUILD_TIME = "2026/06/16 11:07";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1602,7 +1602,12 @@ function App() {
   const saveAnnotation = async ({ strokes, grayscale, dataUrl }) => {
     if (annotating.type === 'inline') {
       const img = bodyRef.current?.querySelector(`img[data-inline="${annotating.imgId}"]`);
-      if (img && dataUrl) { img.src = dataUrl; updateNoteFields({ body: bodyRef.current.innerHTML }); }
+      if (img && dataUrl) {
+        if (!img.dataset.original) img.dataset.original = img.src;
+        img.src = dataUrl;
+        img.dataset.strokes = JSON.stringify(strokes || []);
+        updateNoteFields({ body: bodyRef.current.innerHTML });
+      }
     } else if (annotating.type === 'task') {
       const task = tasks.find(t => t.id === annotating.id);
       const imgs = task.images.map((im, i) => i === annotating.imgIndex ? { ...im, strokes, grayscale } : im);
@@ -2808,7 +2813,13 @@ function App() {
           }, isRow ? '↕ 獨排' : '↔ 並排'),
           h('div', { style: { width: 1, background: '#4b5563', margin: '4px 2px', alignSelf: 'stretch' } }),
           h('button', { style: { ...btnStyle, color: '#5eead4' },
-            onClick: () => { setAnnotating({ type: 'inline', imgId: selImg.imgId, src: selImg.src }); clearSelImg(); } }, '✏️ 標注'),
+            onClick: () => {
+              const img = bodyRef.current?.querySelector(`img[data-inline="${selImg.imgId}"]`);
+              let strokes = [];
+              try { strokes = JSON.parse(img?.dataset.strokes || '[]'); } catch {}
+              setAnnotating({ type: 'inline', imgId: selImg.imgId, src: img?.dataset.original || selImg.src, strokes });
+              clearSelImg();
+            } }, '✏️ 標注'),
           h('button', { style: { ...btnStyle, color: '#fca5a5' },
             onClick: () => { deleteInlineImg(selImg.imgId); clearSelImg(); } }, '🗑'),
         ),
@@ -2819,7 +2830,7 @@ function App() {
     })(),
     annotating && (() => {
       if (annotating.type === 'inline') return h(PhotoAnnotator, {
-        src: annotating.src, initialStrokes: [], initialGrayscale: false,
+        src: annotating.src, initialStrokes: annotating.strokes || [], initialGrayscale: false,
         onSave: saveAnnotation, onClose: () => setAnnotating(null)
       });
       const im = annotating.type === 'task'
