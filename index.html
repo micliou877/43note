@@ -119,7 +119,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/06/16 11:17";
+const BUILD_TIME = "2026/06/16 15:05";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -2576,8 +2576,7 @@ function App() {
                 h('button', { onClick: manualSaveNote, style: { ...S.primaryBtnSm, background: '#3b82f6' } }, '💾 儲存'),
                 h('button', { onClick: copyNoteText, title: '複製全部文字內容', style: { ...S.ghostBtn, color: copyFeedback ? '#059669' : undefined } }, copyFeedback ? '✓ 已複製' : '📋 複製全文'),
                 h('button', { onClick: exportToPDF, title: '匯出為 PDF', style: S.ghostBtn }, '📄 匯出 PDF'),
-                h('button', { onClick: undoBodyEdit, disabled: !canBodyUndo, title: '上一步 (Ctrl+Z)', style: { ...S.ghostBtn, opacity: canBodyUndo ? 1 : 0.35, cursor: canBodyUndo ? 'pointer' : 'default' } }, '↩ 上一步'),
-                
+
                 // 👇 使用 HTML 原生 <label> 解決手機瀏覽器阻擋相簿的問題
                 h('label', { style: { ...S.ghostBtn, opacity: uploading ? 0.5 : 1, pointerEvents: uploading ? 'none' : 'auto', margin: 0 } },
                   uploading ? '處理中…' : '📷 加照片',
@@ -2648,8 +2647,12 @@ function App() {
                   h('button', { onMouseDown: (e) => { e.preventDefault(); applyListItem('li3', '。'); },
                     style: S.fmtBtn, title: '細項 。' }, '。細')
                 ),
-                h('button', { onClick: () => setBodyExpanded(b => !b), title: bodyExpanded ? '縮小' : '放大文字欄',
-                  style: { ...S.fmtBtn, color: '#94a3b8', fontSize: 16 } }, bodyExpanded ? '⊡' : '⊞')
+                h('div', { style: { display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 } },
+                  h('button', { onClick: undoBodyEdit, disabled: !canBodyUndo, title: '上一步 (Ctrl+Z)',
+                    style: { ...S.fmtBtn, minWidth: 'auto', padding: '0 8px', opacity: canBodyUndo ? 1 : 0.35, cursor: canBodyUndo ? 'pointer' : 'default' } }, '↩ 上一步'),
+                  h('button', { onClick: () => setBodyExpanded(b => !b), title: bodyExpanded ? '縮小' : '放大文字欄',
+                    style: { ...S.fmtBtn, color: '#94a3b8', fontSize: 16 } }, bodyExpanded ? '⊡' : '⊞')
+                )
               ),
               h('div', {
                 ref: bodyRef,
