@@ -95,7 +95,8 @@
     "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
     "firebase/app": "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js",
     "firebase/auth": "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js",
-    "firebase/firestore": "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js"
+    "firebase/firestore": "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js",
+    "docx": "https://esm.sh/docx@8.5.0"
   }
 }
 </script>
@@ -107,6 +108,7 @@ import { flushSync } from "react-dom";
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore, collection, query, orderBy, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, serverTimestamp, writeBatch, getDocs, deleteField, limit } from "firebase/firestore";
+import { Document, Paragraph, TextRun, ImageRun, HeadingLevel, Packer } from "docx";
 
 // ════════════════════════════════════════════════════════════════
 const firebaseConfig = {
@@ -119,7 +121,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/06/23 13:14";
+const BUILD_TIME = "2026/06/23 20:51";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1539,25 +1541,104 @@ function App() {
     window.print();
   };
 
-  const exportToWord = () => {
+  const exportToWord = async () => {
     const title = activeNote?.title || '未命名筆記';
+
+    const dataUrlToUint8 = (dataUrl) => {
+      const raw = atob(dataUrl.split(',')[1]);
+      const arr = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+      return arr;
+    };
+
+    const getImgSize = (dataUrl) => new Promise(res => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX_W = 540;
+        const r = (img.naturalHeight || 300) / (img.naturalWidth || 400);
+        const w = Math.min(MAX_W, img.naturalWidth || MAX_W);
+        res({ width: Math.round(w), height: Math.round(w * r) });
+      };
+      img.onerror = () => res({ width: 400, height: 300 });
+      img.src = dataUrl;
+    });
+
+    const getImgType = (dataUrl) => {
+      const m = dataUrl.match(/^data:image\/([^;]+);/);
+      const t = m ? m[1] : 'jpeg';
+      if (t === 'png') return 'png';
+      if (t === 'gif') return 'gif';
+      if (t === 'bmp') return 'bmp';
+      return 'jpg';
+    };
+
+    const makeImgPara = async (dataUrl) => {
+      const size = await getImgSize(dataUrl);
+      return new Paragraph({
+        children: [new ImageRun({ data: dataUrlToUint8(dataUrl), transformation: size, type: getImgType(dataUrl) })]
+      });
+    };
+
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = activeNote?.body || '';
-    tempDiv.querySelectorAll('.li1,.li2,.li3').forEach(el => {
-      const indent = el.classList.contains('li3') ? '4em' : el.classList.contains('li2') ? '2em' : '0';
-      el.style.marginLeft = indent;
-      el.removeAttribute('class');
-    });
-    tempDiv.querySelectorAll('img').forEach(el => { el.removeAttribute('class'); el.style.maxWidth = '100%'; });
-    const imgsHtml = noteImages.map(im => `<p><img src="${im.dataUrl}" style="max-width:100%;display:block;margin:6px 0;"/></p>`).join('');
-    const bodyHtml = tempDiv.innerHTML + imgsHtml;
-    const escaped = title.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${escaped}</title><style>body{font-family:'微軟正黑體',Arial,sans-serif;font-size:12pt;}h1{font-size:18pt;margin-bottom:12pt;}blockquote{margin-left:2em;border-left:3px solid #d1d5db;padding-left:8px;color:#6b7280;}</style></head><body><h1>${escaped}</h1>${bodyHtml}</body></html>`;
-    const blob = new Blob(['﻿', html], { type: 'application/msword' });
+    const paras = [];
+
+    paras.push(new Paragraph({ text: title, heading: HeadingLevel.HEADING_1 }));
+
+    const processNode = async (node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const t = node.textContent;
+        if (t.trim()) paras.push(new Paragraph({ children: [new TextRun(t)] }));
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+      const tag = node.tagName.toLowerCase();
+
+      if (tag === 'img') {
+        const src = node.getAttribute('src') || '';
+        if (src.startsWith('data:')) paras.push(await makeImgPara(src));
+        return;
+      }
+      if (tag === 'br') { paras.push(new Paragraph({})); return; }
+
+      const hasImg = Array.from(node.childNodes).some(n => n.nodeName === 'IMG');
+      if (hasImg) {
+        for (const child of Array.from(node.childNodes)) await processNode(child);
+        return;
+      }
+
+      const text = node.textContent || '';
+      if (!text.trim()) return;
+
+      if (/^h[1-6]$/.test(tag)) {
+        const lvls = [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3, HeadingLevel.HEADING_4, HeadingLevel.HEADING_5, HeadingLevel.HEADING_6];
+        paras.push(new Paragraph({ text, heading: lvls[parseInt(tag[1]) - 1] }));
+      } else if (tag === 'blockquote') {
+        paras.push(new Paragraph({ text, indent: { left: 720 } }));
+      } else if (node.classList?.contains('li3')) {
+        paras.push(new Paragraph({ text: '    ▪ ' + text, indent: { left: 720 } }));
+      } else if (node.classList?.contains('li2')) {
+        paras.push(new Paragraph({ text: '  ◦ ' + text, indent: { left: 360 } }));
+      } else if (node.classList?.contains('li1')) {
+        paras.push(new Paragraph({ text: '• ' + text }));
+      } else {
+        paras.push(new Paragraph({ text }));
+      }
+    };
+
+    for (const node of Array.from(tempDiv.childNodes)) await processNode(node);
+
+    for (const im of noteImages) {
+      if (im.dataUrl?.startsWith('data:')) paras.push(await makeImgPara(im.dataUrl));
+    }
+
+    const docFile = new Document({ sections: [{ properties: {}, children: paras }] });
+    const blob = await Packer.toBlob(docFile);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${title}.doc`;
+    a.download = `${title}.docx`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -2601,7 +2682,7 @@ function App() {
                 h('button', { onClick: manualSaveNote, style: { ...S.primaryBtnSm, background: '#3b82f6' } }, '💾 儲存'),
                 h('button', { onClick: copyNoteText, title: '複製全部文字內容', style: { ...S.ghostBtn, color: copyFeedback ? '#059669' : undefined } }, copyFeedback ? '✓ 已複製' : '📋 複製全文'),
                 h('button', { onClick: exportToPDF, title: '匯出為 PDF', style: S.ghostBtn }, '📄 匯出 PDF'),
-                h('button', { onClick: exportToWord, title: '匯出為 Word (.doc)', style: S.ghostBtn }, '📝 匯出 Word'),
+                h('button', { onClick: exportToWord, title: '匯出為 Word (.docx)', style: S.ghostBtn }, '📝 匯出 Word'),
 
                 // 👇 使用 HTML 原生 <label> 解決手機瀏覽器阻擋相簿的問題
                 h('label', { style: { ...S.ghostBtn, opacity: uploading ? 0.5 : 1, pointerEvents: uploading ? 'none' : 'auto', margin: 0 } },
