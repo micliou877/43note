@@ -119,7 +119,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/06/16 15:05";
+const BUILD_TIME = "2026/06/23 13:14";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1539,6 +1539,31 @@ function App() {
     window.print();
   };
 
+  const exportToWord = () => {
+    const title = activeNote?.title || '未命名筆記';
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = activeNote?.body || '';
+    tempDiv.querySelectorAll('.li1,.li2,.li3').forEach(el => {
+      const indent = el.classList.contains('li3') ? '4em' : el.classList.contains('li2') ? '2em' : '0';
+      el.style.marginLeft = indent;
+      el.removeAttribute('class');
+    });
+    tempDiv.querySelectorAll('img').forEach(el => { el.removeAttribute('class'); el.style.maxWidth = '100%'; });
+    const imgsHtml = noteImages.map(im => `<p><img src="${im.dataUrl}" style="max-width:100%;display:block;margin:6px 0;"/></p>`).join('');
+    const bodyHtml = tempDiv.innerHTML + imgsHtml;
+    const escaped = title.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${escaped}</title><style>body{font-family:'微軟正黑體',Arial,sans-serif;font-size:12pt;}h1{font-size:18pt;margin-bottom:12pt;}blockquote{margin-left:2em;border-left:3px solid #d1d5db;padding-left:8px;color:#6b7280;}</style></head><body><h1>${escaped}</h1>${bodyHtml}</body></html>`;
+    const blob = new Blob(['﻿', html], { type: 'application/msword' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${title}.doc`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   const applyListItem = (cls, prefix) => {
     const body = bodyRef.current; if (!body) return; body.focus();
     const sel = window.getSelection();
@@ -2576,6 +2601,7 @@ function App() {
                 h('button', { onClick: manualSaveNote, style: { ...S.primaryBtnSm, background: '#3b82f6' } }, '💾 儲存'),
                 h('button', { onClick: copyNoteText, title: '複製全部文字內容', style: { ...S.ghostBtn, color: copyFeedback ? '#059669' : undefined } }, copyFeedback ? '✓ 已複製' : '📋 複製全文'),
                 h('button', { onClick: exportToPDF, title: '匯出為 PDF', style: S.ghostBtn }, '📄 匯出 PDF'),
+                h('button', { onClick: exportToWord, title: '匯出為 Word (.doc)', style: S.ghostBtn }, '📝 匯出 Word'),
 
                 // 👇 使用 HTML 原生 <label> 解決手機瀏覽器阻擋相簿的問題
                 h('label', { style: { ...S.ghostBtn, opacity: uploading ? 0.5 : 1, pointerEvents: uploading ? 'none' : 'auto', margin: 0 } },
