@@ -121,7 +121,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/06/25 10:58";
+const BUILD_TIME = "2026/06/25 12:03";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -2738,18 +2738,25 @@ function App() {
                     if (!sel || sel.isCollapsed || sel.rangeCount === 0) { bodyRef.current?.focus(); return; }
                     const range = sel.getRangeAt(0);
                     if (!bodyRef.current?.contains(range.commonAncestorContainer)) { bodyRef.current?.focus(); return; }
-                    // surroundContents 精確包住選取文字，避免 execCommand 把整個 block 都套色的瀏覽器 bug
-                    try {
-                      const span = document.createElement('span');
-                      span.style.backgroundColor = '#fef08a';
-                      range.surroundContents(span);
-                      sel.removeAllRanges();
-                      updateNoteFields({ body: bodyRef.current?.innerHTML || '' });
-                    } catch {
-                      // 選取跨越多個元素時退回 execCommand
-                      document.execCommand('hiliteColor', false, '#fef08a');
-                      updateNoteFields({ body: bodyRef.current?.innerHTML || '' });
+                    const now = Date.now();
+                    if (now - bodyUndoLastPush.current > 800) {
+                      bodyUndoStack.current = [...bodyUndoStack.current, activeNote.body || ''].slice(-50);
+                      bodyUndoLastPush.current = now;
+                      setCanBodyUndo(true);
                     }
+                    // extractContents + span：直接包住選取內容為行內 <span>，
+                    // 完全避開 execCommand('hiliteColor') 把背景色套到整個 block 的瀏覽器 bug
+                    const frag = range.extractContents();
+                    const span = document.createElement('span');
+                    span.style.backgroundColor = '#fef08a';
+                    span.appendChild(frag);
+                    range.insertNode(span);
+                    const r = document.createRange();
+                    r.setStartAfter(span);
+                    r.collapse(true);
+                    sel.removeAllRanges();
+                    sel.addRange(r);
+                    updateNoteFields({ body: bodyRef.current?.innerHTML || '' });
                     bodyRef.current?.focus();
                   },
                     style: { ...S.fmtBtn, fontSize: 11, background: '#fef08a', border: '1px solid #fde68a' }, title: '螢光標記' }, '螢光'),
@@ -2764,7 +2771,34 @@ function App() {
                   h('button', { onMouseDown: (e) => { e.preventDefault(); document.execCommand('insertOrderedList'); bodyRef.current?.focus(); },
                     style: S.fmtBtn, title: '編號清單' }, '1. 清單'),
                   h('div', { style: S.fmtDivider }),
-                  h('button', { onMouseDown: (e) => { e.preventDefault(); document.execCommand('removeFormat'); bodyRef.current?.focus(); },
+                  h('button', { onMouseDown: (e) => {
+                    e.preventDefault();
+                    document.execCommand('removeFormat');
+                    // removeFormat 只能清除行內格式；額外掃描並清除 selection 範圍內
+                    // 所有帶 background-color 的元素（包含 block 層級的 div/p）
+                    const sel = window.getSelection();
+                    if (sel && sel.rangeCount > 0 && bodyRef.current) {
+                      const range = sel.getRangeAt(0);
+                      bodyRef.current.querySelectorAll('[style]').forEach(el => {
+                        if (el !== bodyRef.current && el.style.backgroundColor && range.intersectsNode(el)) {
+                          el.style.removeProperty('background-color');
+                          if (!el.style.cssText.trim()) el.removeAttribute('style');
+                        }
+                      });
+                      // 也清除包住 selection 的祖先元素上的 background-color
+                      let node = range.startContainer.nodeType === Node.TEXT_NODE
+                        ? range.startContainer.parentElement : range.startContainer;
+                      while (node && node !== bodyRef.current) {
+                        if (node.style && node.style.backgroundColor) {
+                          node.style.removeProperty('background-color');
+                          if (!node.style.cssText.trim()) node.removeAttribute('style');
+                        }
+                        node = node.parentElement;
+                      }
+                      updateNoteFields({ body: bodyRef.current.innerHTML || '' });
+                    }
+                    bodyRef.current?.focus();
+                  },
                     style: { ...S.fmtBtn, fontSize: 11, color: '#94a3b8' }, title: '清除所有格式' }, '✕格式'),
                   h('div', { style: S.fmtDivider }),
                   h('button', { onMouseDown: (e) => { e.preventDefault(); applyListItem('li1', '1.'); },
