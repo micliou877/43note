@@ -121,7 +121,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/06/23 20:51";
+const BUILD_TIME = "2026/06/25 10:58";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -626,7 +626,7 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
   const [width, setWidth] = useState(4);
   const [strokes, setStrokes] = useState((initialStrokes || []).filter(Boolean));
   const [grayscale, setGrayscale] = useState(!!initialGrayscale);
-  const [drawing, setDrawing] = useState(false);
+  const drawingRef = useRef(false);
   const cur = useRef(null);
   const grayCanvasRef = useRef(null);
   const canvasWrapRef = useRef(null);
@@ -753,8 +753,8 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
     panStart.current = null;
     const p = pos(e);
     if (tool === "text") { setTextInput({ x: p.x, y: p.y, value: "" }); return; }
-    if (tool === "erase") { setDrawing(true); eraseAt(p); return; }
-    setDrawing(true);
+    if (tool === "erase") { drawingRef.current = true; eraseAt(p); return; }
+    drawingRef.current = true;
     if (tool === "pen") cur.current = { id: uid(), type: "pen", color, width, points: [p] };
     else cur.current = { id: uid(), type: tool, color, width, x0: p.x, y0: p.y, x1: p.x, y1: p.y };
   };
@@ -776,9 +776,10 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
       setZoom(+(newZoom.toFixed(2)));
       return;
     }
-    if (!drawing) return;
+    if (!drawingRef.current) return;
     const p = pos(e);
     if (tool === "erase") { eraseAt(p); return; }
+    if (!cur.current) return;
     if (tool === "pen") cur.current.points.push(p);
     else { cur.current.x1 = p.x; cur.current.y1 = p.y; }
     redraw();
@@ -786,8 +787,8 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
 
   const end = () => {
     panStart.current = null;
-    if (!drawing) return;
-    setDrawing(false);
+    if (!drawingRef.current) return;
+    drawingRef.current = false;
     if (tool === "erase") return;
     const finished = cur.current;
     cur.current = null;
@@ -2731,7 +2732,26 @@ function App() {
                       title: '文字顏色',
                       style: { width: 16, height: 16, borderRadius: '50%', background: c, border: fontColor === c ? '2px solid #0d9488' : '1px solid rgba(0,0,0,0.12)', cursor: 'pointer', padding: 0, flexShrink: 0 } })
                   ),
-                  h('button', { onMouseDown: (e) => { e.preventDefault(); document.execCommand('hiliteColor', false, '#fef08a'); bodyRef.current?.focus(); },
+                  h('button', { onMouseDown: (e) => {
+                    e.preventDefault();
+                    const sel = window.getSelection();
+                    if (!sel || sel.isCollapsed || sel.rangeCount === 0) { bodyRef.current?.focus(); return; }
+                    const range = sel.getRangeAt(0);
+                    if (!bodyRef.current?.contains(range.commonAncestorContainer)) { bodyRef.current?.focus(); return; }
+                    // surroundContents 精確包住選取文字，避免 execCommand 把整個 block 都套色的瀏覽器 bug
+                    try {
+                      const span = document.createElement('span');
+                      span.style.backgroundColor = '#fef08a';
+                      range.surroundContents(span);
+                      sel.removeAllRanges();
+                      updateNoteFields({ body: bodyRef.current?.innerHTML || '' });
+                    } catch {
+                      // 選取跨越多個元素時退回 execCommand
+                      document.execCommand('hiliteColor', false, '#fef08a');
+                      updateNoteFields({ body: bodyRef.current?.innerHTML || '' });
+                    }
+                    bodyRef.current?.focus();
+                  },
                     style: { ...S.fmtBtn, fontSize: 11, background: '#fef08a', border: '1px solid #fde68a' }, title: '螢光標記' }, '螢光'),
                   h('div', { style: S.fmtDivider }),
                   h('button', { onMouseDown: (e) => { e.preventDefault(); document.execCommand('indent'); bodyRef.current?.focus(); },
