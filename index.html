@@ -121,7 +121,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/06/25 12:03";
+const BUILD_TIME = "2026/07/02 09:50";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -133,7 +133,12 @@ try {
     localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
   });
 } catch (e) {
-  db = getFirestore(app);
+  try {
+    // 單 tab 離線快取（Safari / Firefox 私密模式等不支援多 tab 時的 fallback）
+    db = initializeFirestore(app, { localCache: persistentLocalCache() });
+  } catch (e2) {
+    db = getFirestore(app);
+  }
 }
 const googleProvider = new GoogleAuthProvider();
 
@@ -158,6 +163,17 @@ const fmtDue = (dueDate) => {
   if (dDay.getTime() === tomorrow.getTime()) return { text: `明天 ${hm}`, color: '#0d9488', bg: '#f0fdfa' };
   return { text: `${d.getMonth()+1}/${d.getDate()} ${hm}`, color: '#64748b', bg: '#f8fafc' };
 };
+const _pad = n => String(n).padStart(2, '0');
+const toLocalDTStr = d => `${d.getFullYear()}-${_pad(d.getMonth()+1)}-${_pad(d.getDate())}T${_pad(d.getHours())}:${_pad(d.getMinutes())}`;
+function nextOccurrenceDate(dueDate, recur, recurInterval) {
+  const d = new Date(dueDate);
+  if (recur === 'weekly') d.setDate(d.getDate() + 7);
+  else if (recur === 'monthly') d.setMonth(d.getMonth() + 1);
+  else if (recur === 'bimonthly') d.setMonth(d.getMonth() + 2);
+  else if (recur === 'custom' && recurInterval > 0) d.setDate(d.getDate() + recurInterval);
+  return d;
+}
+const RECUR_LABEL = { weekly: '每週', monthly: '每月', bimonthly: '每兩個月', custom: '自訂' };
 
 function compressImage(file) {
   return new Promise((resolve, reject) => {
@@ -412,6 +428,8 @@ function NewTaskModal({ onConfirm, onCancel }) {
   const [title, setTitle] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [reminderOffset, setReminderOffset] = useState('');
+  const [recur, setRecur] = useState('');
+  const [recurInterval, setRecurInterval] = useState('7');
   const [loading, setLoading] = useState(false);
   const [isComposing, setIsComposing] = useState(false);
 
@@ -419,7 +437,12 @@ function NewTaskModal({ onConfirm, onCancel }) {
     if (!title.trim() || loading) return;
     setLoading(true);
     try {
-      await onConfirm({ title: title.trim(), dueDate: dueDate || null, reminderOffset: reminderOffset !== '' ? parseInt(reminderOffset) : null });
+      await onConfirm({
+        title: title.trim(), dueDate: dueDate || null,
+        reminderOffset: reminderOffset !== '' ? parseInt(reminderOffset) : null,
+        recur: dueDate && recur ? recur : null,
+        recurInterval: dueDate && recur === 'custom' ? (parseInt(recurInterval) || 7) : null,
+      });
     } catch { setLoading(false); }
   };
 
@@ -446,6 +469,23 @@ function NewTaskModal({ onConfirm, onCancel }) {
           h('option', { value: '1440' }, '提前 1 天')
         )
       ),
+      dueDate && h('div', { style: { marginBottom: 16 } },
+        h('label', { style: { fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 } }, '重複週期'),
+        h('select', { value: recur, onChange: e => setRecur(e.target.value),
+          style: { width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 10, fontSize: 13, outline: 'none', background: '#fff', marginBottom: recur === 'custom' ? 8 : 0 } },
+          h('option', { value: '' }, '不重複'),
+          h('option', { value: 'weekly' }, '每週一次'),
+          h('option', { value: 'monthly' }, '每月一次'),
+          h('option', { value: 'bimonthly' }, '每兩個月一次'),
+          h('option', { value: 'custom' }, '每 N 天一次')
+        ),
+        recur === 'custom' && h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 } },
+          h('span', { style: { fontSize: 13, color: '#374151' } }, '每'),
+          h('input', { type: 'number', min: 1, max: 365, value: recurInterval, onChange: e => setRecurInterval(e.target.value),
+            style: { width: 72, padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, textAlign: 'center', outline: 'none' } }),
+          h('span', { style: { fontSize: 13, color: '#374151' } }, '天重複一次')
+        )
+      ),
       h('div', { style: S.modalActions },
         h('button', { onClick: onCancel, disabled: loading, style: S.ghostBtn }, '取消'),
         h('button', { onClick: submit, disabled: !title.trim() || loading, style: { ...S.primaryBtn, opacity: title.trim() ? 1 : 0.5 } }, loading ? '處理中…' : '建立')
@@ -457,6 +497,8 @@ function NewTaskModal({ onConfirm, onCancel }) {
 function DueDateModal({ task, onSave, onCancel }) {
   const [dueDate, setDueDate] = useState(task.dueDate || '');
   const [reminderOffset, setReminderOffset] = useState(task.reminderOffset != null ? String(task.reminderOffset) : '');
+  const [recur, setRecur] = useState(task.recur || '');
+  const [recurInterval, setRecurInterval] = useState(String(task.recurInterval || 7));
 
   return h('div', { style: S.modalOverlay, onClick: e => e.target === e.currentTarget && onCancel() },
     h('div', { style: S.modalCard },
@@ -477,10 +519,27 @@ function DueDateModal({ task, onSave, onCancel }) {
           h('option', { value: '1440' }, '提前 1 天')
         )
       ),
+      dueDate && h('div', { style: { marginBottom: 16 } },
+        h('label', { style: { fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 } }, '重複週期'),
+        h('select', { value: recur, onChange: e => setRecur(e.target.value),
+          style: { width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 10, fontSize: 13, outline: 'none', background: '#fff', marginBottom: recur === 'custom' ? 8 : 0 } },
+          h('option', { value: '' }, '不重複'),
+          h('option', { value: 'weekly' }, '每週一次'),
+          h('option', { value: 'monthly' }, '每月一次'),
+          h('option', { value: 'bimonthly' }, '每兩個月一次'),
+          h('option', { value: 'custom' }, '每 N 天一次')
+        ),
+        recur === 'custom' && h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 } },
+          h('span', { style: { fontSize: 13, color: '#374151' } }, '每'),
+          h('input', { type: 'number', min: 1, max: 365, value: recurInterval, onChange: e => setRecurInterval(e.target.value),
+            style: { width: 72, padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, textAlign: 'center', outline: 'none' } }),
+          h('span', { style: { fontSize: 13, color: '#374151' } }, '天重複一次')
+        )
+      ),
       h('div', { style: S.modalActions },
         h('button', { onClick: onCancel, style: S.ghostBtn }, '取消'),
-        dueDate && h('button', { onClick: () => onSave(null, null), style: { ...S.ghostBtn, color: '#ef4444', borderColor: '#fecaca' } }, '清除日期'),
-        h('button', { onClick: () => onSave(dueDate || null, reminderOffset !== '' ? parseInt(reminderOffset) : null), style: S.primaryBtn }, '儲存')
+        dueDate && h('button', { onClick: () => onSave(null, null, null, null), style: { ...S.ghostBtn, color: '#ef4444', borderColor: '#fecaca' } }, '清除日期'),
+        h('button', { onClick: () => onSave(dueDate || null, reminderOffset !== '' ? parseInt(reminderOffset) : null, dueDate && recur ? recur : null, dueDate && recur === 'custom' ? (parseInt(recurInterval) || 7) : null), style: S.primaryBtn }, '儲存')
       )
     )
   );
@@ -505,6 +564,22 @@ function CalendarView({ tasks, selectedDate, onSelectDate }) {
     const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
     if (!tasksByDate[key]) tasksByDate[key] = [];
     tasksByDate[key].push(t);
+  });
+  // Add recurring occurrences within the current view month
+  const viewStart = new Date(viewYear, viewMonth, 1);
+  const viewEnd = new Date(viewYear, viewMonth + 1, 0, 23, 59, 59);
+  tasks.forEach(t => {
+    if (!t.recur || !t.dueDate || t.deleted || t.done) return;
+    let cur = nextOccurrenceDate(t.dueDate, t.recur, t.recurInterval);
+    let steps = 0;
+    while (cur < viewStart && steps < 500) { cur = nextOccurrenceDate(cur, t.recur, t.recurInterval); steps++; }
+    while (cur <= viewEnd && steps < 600) {
+      const rKey = `${cur.getFullYear()}-${cur.getMonth()}-${cur.getDate()}`;
+      if (!tasksByDate[rKey]) tasksByDate[rKey] = [];
+      if (!tasksByDate[rKey].find(x => x.id === t.id)) tasksByDate[rKey].push({ ...t, _recurVirtual: true });
+      cur = nextOccurrenceDate(cur, t.recur, t.recurInterval);
+      steps++;
+    }
   });
 
   const prevM = () => { if (viewMonth === 0) { setViewYear(y => y-1); setViewMonth(11); } else setViewMonth(m => m-1); };
@@ -1806,11 +1881,13 @@ function App() {
     const title = typeof input === 'string' ? input : input.title;
     const dueDate = typeof input === 'object' ? (input.dueDate || null) : null;
     const reminderOffset = typeof input === 'object' && input.reminderOffset != null ? input.reminderOffset : null;
+    const recur = typeof input === 'object' ? (input.recur || null) : null;
+    const recurInterval = typeof input === 'object' ? (input.recurInterval || null) : null;
     try {
       const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("連線逾時")), 5000));
       const addPromise = addDoc(collection(db, `users/${user.uid}/tasks`), {
         projectId: activeProject.id, title, done: false, deleted: false, images: [], pinned: false, sortOrder: Date.now(),
-        created: serverTimestamp(), dueDate, reminderOffset, reminded: false,
+        created: serverTimestamp(), dueDate, reminderOffset, reminded: false, recur, recurInterval,
       });
       await Promise.race([addPromise, timeout]);
       scrollToBottomRef.current = true;
@@ -1821,18 +1898,30 @@ function App() {
       throw err;
     }
   };
-  const updateTaskDueDate = async (id, dueDate, reminderOffset) => {
+  const updateTaskDueDate = async (id, dueDate, reminderOffset, recur, recurInterval) => {
     await updateDoc(doc(db, `users/${user.uid}/tasks/${id}`), {
       dueDate: dueDate || null,
       reminderOffset: reminderOffset != null ? reminderOffset : null,
       reminded: false,
+      recur: recur || null,
+      recurInterval: recurInterval || null,
     });
     setSetDueDateTask(null);
   };
   const completeTask = async (reason) => {
+    const task = tasks.find(t => t.id === completeTaskId);
     await updateDoc(doc(db, `users/${user.uid}/tasks/${completeTaskId}`), {
       done: true, doneReason: reason, doneAt: serverTimestamp()
     });
+    if (task && task.recur && task.dueDate) {
+      const nextDate = nextOccurrenceDate(task.dueDate, task.recur, task.recurInterval);
+      await addDoc(collection(db, `users/${user.uid}/tasks`), {
+        projectId: task.projectId, title: task.title, done: false, deleted: false, images: [],
+        pinned: false, sortOrder: Date.now(), created: serverTimestamp(),
+        dueDate: toLocalDTStr(nextDate), reminderOffset: task.reminderOffset ?? null,
+        reminded: false, recur: task.recur, recurInterval: task.recurInterval ?? null,
+      });
+    }
     scrollToBottomRef.current = true;
     setCompleteTaskId(null);
   };
@@ -2036,7 +2125,7 @@ function App() {
 
   const offlineBanner = isOffline && h('div', {
     style: { position: 'fixed', top: 0, left: 0, right: 0, background: '#fef3c7', color: '#92400e', padding: '6px 14px', fontSize: 12.5, textAlign: 'center', zIndex: 300, borderBottom: '1px solid #fde68a' }
-  }, '📵 離線模式 — 顯示快取資料，新增與修改將在恢復連線後同步');
+  }, '📵 離線模式 — 讀寫正常，資料已存本機，恢復連線後自動同步');
 
   // 排序優先順序：釘選 > 拖曳自訂順序(sortOrder) > 預設排序
   const byOrder = (a, b) => {
@@ -2587,7 +2676,7 @@ function App() {
                     t.dueDate && !t.done && (() => { const due = fmtDue(t.dueDate); return h('div', {
                       onClick: () => setSetDueDateTask(t),
                       style: { display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, color: due.color, background: due.bg, padding: '1px 7px', borderRadius: 10, marginTop: 4, cursor: 'pointer', border: `1px solid ${due.bg}` }
-                    }, `📅 ${due.text}`); })(),
+                    }, `📅 ${due.text}`, t.recur && h('span', { style: { marginLeft: 3, color: '#0d9488', fontWeight: 600 } }, `🔁${RECUR_LABEL[t.recur] || ''}`)); })(),
                     h('div', { style: S.taskMeta }, t.done ? `完成於 ${fmt(t.doneAt)}` : `建立於 ${fmt(t.created)}`)
                   ),
                   h('span', { onClick: () => toggleTaskPin(t.id, t.pinned),
@@ -2627,20 +2716,34 @@ function App() {
             h('div', { style: { padding: '8px 14px 4px', borderTop: '1px solid #f1f5f9', fontSize: 13, fontWeight: 600, color: '#0f172a' } },
               `${calSelectedDate.getMonth()+1} 月 ${calSelectedDate.getDate()} 日 的任務`),
             (() => {
-              const dayTasks = visibleTasks.filter(t => {
-                if (!t.dueDate) return false;
+              const seenIds = new Set();
+              const dayTasks = [];
+              visibleTasks.forEach(t => {
+                if (!t.dueDate) return;
                 const d = new Date(t.dueDate);
-                return d.getDate() === calSelectedDate.getDate() && d.getMonth() === calSelectedDate.getMonth() && d.getFullYear() === calSelectedDate.getFullYear();
+                const sameDay = d.getDate() === calSelectedDate.getDate() && d.getMonth() === calSelectedDate.getMonth() && d.getFullYear() === calSelectedDate.getFullYear();
+                if (sameDay && !seenIds.has(t.id)) { dayTasks.push(t); seenIds.add(t.id); }
+                if (t.recur && !t.done) {
+                  let cur = nextOccurrenceDate(t.dueDate, t.recur, t.recurInterval);
+                  let steps = 0;
+                  while (cur <= calSelectedDate && steps < 500) {
+                    if (cur.getFullYear() === calSelectedDate.getFullYear() && cur.getMonth() === calSelectedDate.getMonth() && cur.getDate() === calSelectedDate.getDate() && !seenIds.has(t.id)) {
+                      dayTasks.push({ ...t, _recurVirtual: true }); seenIds.add(t.id); break;
+                    }
+                    cur = nextOccurrenceDate(cur, t.recur, t.recurInterval); steps++;
+                  }
+                }
               });
               return dayTasks.length === 0
                 ? h('div', { style: S.empty }, '這天沒有排程任務')
                 : h('div', null, ...dayTasks.map(t =>
-                    h('div', { key: t.id, style: { ...S.taskItem, opacity: t.done ? 0.6 : 1 } },
+                    h('div', { key: t.id + (t._recurVirtual ? '_r' : ''), style: { ...S.taskItem, opacity: t.done ? 0.6 : 1 } },
                       h('div', { style: { ...S.taskCheck, ...(t.done ? S.taskCheckDone : {}), cursor: 'default', flexShrink: 0 } }, t.done ? '✓' : ''),
                       h('div', { style: { flex: 1 } },
                         h('div', { style: { ...S.taskTitle, ...(t.done ? S.taskTitleDone : {}) } }, t.title),
                         h('div', { style: { fontSize: 11, color: '#94a3b8', marginTop: 2 } },
-                          new Date(t.dueDate).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false }))
+                          new Date(t.dueDate).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false }),
+                          t.recur && h('span', { style: { marginLeft: 6, color: '#0d9488' } }, `🔁 ${RECUR_LABEL[t.recur] || ''}${t.recur === 'custom' ? ` ${t.recurInterval}天` : ''}`))
                       )
                     )
                   ));
@@ -3009,7 +3112,7 @@ function App() {
     newTaskModal && h(NewTaskModal, { onConfirm: addTask, onCancel: () => setNewTaskModal(false) }),
     setDueDateTask && h(DueDateModal, {
       task: setDueDateTask,
-      onSave: (dueDate, reminderOffset) => updateTaskDueDate(setDueDateTask.id, dueDate, reminderOffset),
+      onSave: (dueDate, reminderOffset, recur, recurInterval) => updateTaskDueDate(setDueDateTask.id, dueDate, reminderOffset, recur, recurInterval),
       onCancel: () => setSetDueDateTask(null)
     }),
     completeTaskId && h(TextModal, {
