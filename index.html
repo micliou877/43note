@@ -121,7 +121,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/02 09:50";
+const BUILD_TIME = "2026/07/07 23:52";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1285,6 +1285,9 @@ function App() {
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const [allNotesForSearch, setAllNotesForSearch] = useState([]);
   const [allTasksForSearch, setAllTasksForSearch] = useState([]);
+  const [showAllTasks, setShowAllTasks] = useState(false);
+  const [allTasksFull, setAllTasksFull] = useState([]);
+  const [allTasksFilter, setAllTasksFilter] = useState('pending');
 
   useEffect(() => {
     const goOnline = () => setIsOffline(false);
@@ -1445,6 +1448,12 @@ function App() {
     });
     return () => { unsubN(); unsubT(); };
   }, [user, showTrash]);
+
+  useEffect(() => {
+    if (!user || !showAllTasks) { setAllTasksFull([]); return; }
+    return onSnapshot(query(collection(db, `users/${user.uid}/tasks`), where('deleted', '==', false)),
+      snap => setAllTasksFull(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+  }, [user, showAllTasks]);
 
   // Projects
   const createProject = async (name) => {
@@ -1909,7 +1918,7 @@ function App() {
     setSetDueDateTask(null);
   };
   const completeTask = async (reason) => {
-    const task = tasks.find(t => t.id === completeTaskId);
+    const task = tasks.find(t => t.id === completeTaskId) || allTasksFull.find(t => t.id === completeTaskId);
     await updateDoc(doc(db, `users/${user.uid}/tasks/${completeTaskId}`), {
       done: true, doneReason: reason, doneAt: serverTimestamp()
     });
@@ -2423,6 +2432,20 @@ function App() {
       },
       style: { ...S.trashBtn, ...(showTrash ? S.trashBtnActive : {}) }
     }, '🗑️ 垃圾桶'),
+    h('button', {
+      onClick: () => {
+        saveIfDirtyRef.current?.();
+        setSaveStatus('idle');
+        setShowAllTasks(v => {
+          const isOpening = !v;
+          setMobileView(isOpening ? 'list' : 'sidebar');
+          return isOpening;
+        });
+        setShowTrash(false);
+        setActiveProject(null); setActiveNote(null);
+      },
+      style: { ...S.trashBtn, ...(showAllTasks ? { background: '#f0fdfa', color: '#0d9488' } : {}) }
+    }, '☑️ 所有任務'),
     (() => {
       const lastBackup = parseInt(localStorage.getItem(BACKUP_LS_KEY) || '0');
       const daysSince = lastBackup ? Math.floor((Date.now() - lastBackup) / 86400000) : null;
@@ -2454,6 +2477,140 @@ function App() {
         h('span', { style: S.userName }, user.displayName || user.email)),
       h('button', { onClick: () => signOut(auth), style: { ...S.miniBtn, background: '#f1f5f9', color: '#64748b', width: 30, height: 30 }, title: '登出' }, '⎋'))
   );
+
+  // 所有任務視圖
+  if (showAllTasks) {
+    const filteredAllTasks = allTasksFull.filter(t => {
+      if (allTasksFilter === 'pending') return !t.done;
+      if (allTasksFilter === 'done') return t.done;
+      return true;
+    });
+    const projectMap = {};
+    projects.forEach(p => { projectMap[p.id] = p; });
+    const byProject = {};
+    filteredAllTasks.forEach(t => {
+      const pid = t.projectId || '__none__';
+      if (!byProject[pid]) byProject[pid] = [];
+      byProject[pid].push(t);
+    });
+    Object.keys(byProject).forEach(pid => {
+      byProject[pid].sort((a, b) => {
+        if (a.dueDate && b.dueDate) return new Date(a.dueDate) - new Date(b.dueDate);
+        if (a.dueDate) return -1;
+        if (b.dueDate) return 1;
+        return 0;
+      });
+    });
+    const pendingTotal = allTasksFull.filter(t => !t.done).length;
+    const doneTotal = allTasksFull.filter(t => t.done).length;
+    const projectIds = Object.keys(byProject).sort((a, b) => {
+      const aHasPending = byProject[a].some(t => !t.done);
+      const bHasPending = byProject[b].some(t => !t.done);
+      if (aHasPending && !bHasPending) return -1;
+      if (!aHasPending && bHasPending) return 1;
+      const aName = (projectMap[a]?.name || '').toLowerCase();
+      const bName = (projectMap[b]?.name || '').toLowerCase();
+      return aName < bName ? -1 : aName > bName ? 1 : 0;
+    });
+    const renderAllTaskItem = (t) => h('div', { key: t.id, style: { ...S.taskItem, opacity: t.done ? 0.7 : 1 } },
+      h('div', {
+        onClick: () => { if (t.done) uncompleteTask(t.id); else setCompleteTaskId(t.id); },
+        style: { ...S.taskCheck, ...(t.done ? S.taskCheckDone : {}) }
+      }, t.done ? '✓' : ''),
+      h('div', { style: { flex: 1 } },
+        h('div', { style: { display: 'flex', alignItems: 'flex-start', gap: 6 } },
+          h('div', { style: { flex: 1 } },
+            editingTask?.id === t.id
+              ? h('input', {
+                  autoFocus: true, value: editingTask.title,
+                  onChange: (e) => setEditingTask({ ...editingTask, title: e.target.value }),
+                  onKeyDown: (e) => { if (e.key === 'Enter') updateTaskTitle(editingTask.id, editingTask.title); if (e.key === 'Escape') setEditingTask(null); },
+                  onBlur: () => updateTaskTitle(editingTask.id, editingTask.title),
+                  style: { width: '100%', fontSize: 14, border: '1px solid #0d9488', borderRadius: 6, padding: '4px 8px', outline: 'none', color: '#1f2937', background: '#f0fdfa', boxSizing: 'border-box' }
+                })
+              : h('div', {
+                  style: { ...S.taskTitle, ...(t.done ? S.taskTitleDone : {}), cursor: t.done ? 'default' : 'text' },
+                  onClick: () => { if (!t.done) setEditingTask({ id: t.id, title: t.title }); }
+                }, t.title),
+            t.done && t.doneReason && h('div', { style: S.taskReason }, `✓ ${t.doneReason}`),
+            t.dueDate && !t.done && (() => { const due = fmtDue(t.dueDate); return h('div', {
+              onClick: () => setSetDueDateTask(t),
+              style: { display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, color: due.color, background: due.bg, padding: '1px 7px', borderRadius: 10, marginTop: 4, cursor: 'pointer', border: `1px solid ${due.bg}` }
+            }, `📅 ${due.text}`, t.recur && h('span', { style: { marginLeft: 3, color: '#0d9488', fontWeight: 600 } }, `🔁${RECUR_LABEL[t.recur] || ''}`)); })(),
+            h('div', { style: S.taskMeta }, t.done ? `完成於 ${fmt(t.doneAt)}` : `建立於 ${fmt(t.created)}`)
+          ),
+          h('button', { onClick: e => { e.stopPropagation(); setSetDueDateTask(t); }, title: '設截止日期 / 提醒',
+            style: { ...S.imgActBtn, margin: 0, flexShrink: 0, fontSize: 13, padding: '5px 7px' } }, '📅'),
+          confirmDel?.type === 'task' && confirmDel.id === t.id
+            ? h('span', { style: { display: 'flex', gap: 4, flexShrink: 0 } },
+                h('span', { style: { color: '#ef4444', cursor: 'pointer' }, onClick: () => trashTask(t.id) }, '✓'),
+                h('span', { style: { color: '#9ca3af', cursor: 'pointer' }, onClick: () => setConfirmDel(null) }, '✕'))
+            : h('span', { style: { color: '#cbd5e1', cursor: 'pointer', flexShrink: 0 }, onClick: () => setConfirmDel({ type: 'task', id: t.id }) }, '🗑')
+        )
+      )
+    );
+    return h('div', { style: S.app },
+      offlineBanner,
+      sidebar,
+      resizeHandle,
+      globalSearchModal,
+      setDueDateTask && h(DueDateModal, {
+        task: setDueDateTask,
+        onSave: (dueDate, reminderOffset, recur, recurInterval) => updateTaskDueDate(setDueDateTask.id, dueDate, reminderOffset, recur, recurInterval),
+        onCancel: () => setSetDueDateTask(null)
+      }),
+      completeTaskId && h(TextModal, {
+        title: '完成任務', subtitle: '記錄一下完成的方式或結果，之後可以回顧。',
+        placeholder: '例如：已親送至客戶辦公室、編號 A-23',
+        multiline: true, confirmText: '完成',
+        onConfirm: completeTask, onCancel: () => setCompleteTaskId(null)
+      }),
+      h('main', { className: mobileView === 'list' ? 'mobile-full-width' : 'hide-on-mobile', style: { ...S.editorCol, overflow: 'hidden' }, ...swipeHandlers('alltasks') },
+        h('div', { style: { padding: '16px 24px 12px', borderBottom: '1px solid #e5e7eb', background: '#fff', flexShrink: 0 } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 } },
+            h('button', { className: 'mobile-only', onClick: () => setMobileView('sidebar'), style: { background: 'none', border: 'none', fontSize: 24, padding: '0 8px', cursor: 'pointer', color: '#64748b' } }, '‹'),
+            h('h2', { style: { margin: 0, fontSize: 17, color: '#0f172a' } }, '☑️ 所有任務'),
+            h('span', { style: { fontSize: 12, color: '#94a3b8' } }, `${pendingTotal} 待完成 · ${doneTotal} 已完成`)
+          ),
+          h('div', { style: { display: 'flex', gap: 6 } },
+            [['pending', `待完成 (${pendingTotal})`], ['done', `已完成 (${doneTotal})`], ['all', `全部 (${allTasksFull.length})`]].map(([f, label]) =>
+              h('button', { key: f, onClick: () => setAllTasksFilter(f),
+                style: { padding: '4px 12px', borderRadius: 20, border: '1px solid', fontSize: 12, cursor: 'pointer', fontWeight: allTasksFilter === f ? 600 : 400,
+                  background: allTasksFilter === f ? '#0d9488' : '#fff',
+                  color: allTasksFilter === f ? '#fff' : '#64748b',
+                  borderColor: allTasksFilter === f ? '#0d9488' : '#e5e7eb' } }, label)
+            )
+          )
+        ),
+        h('div', { style: { overflowY: 'auto', flex: 1 } },
+          allTasksFull.length === 0
+            ? h('div', { style: { ...S.placeholder, height: 200 } }, '載入中…')
+            : filteredAllTasks.length === 0
+            ? h('div', { style: { ...S.placeholder, height: 200 } },
+                allTasksFilter === 'pending'
+                  ? h('div', { style: { textAlign: 'center' } }, h('div', { style: { fontSize: 36, marginBottom: 8 } }, '🎉'), '所有任務都完成了！')
+                  : '沒有已完成的任務')
+            : projectIds.map(pid =>
+                h('div', { key: pid },
+                  h('div', { style: { padding: '8px 20px 5px', fontSize: 12.5, fontWeight: 600, color: '#64748b', background: '#f8fafc', borderBottom: '1px solid #f1f5f9', borderTop: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 8 } },
+                    h('span', null, projectMap[pid]?.name || '未知專案'),
+                    h('span', { style: { fontWeight: 400, fontSize: 11, color: '#94a3b8' } },
+                      `${byProject[pid].filter(t => !t.done).length} 待 / ${byProject[pid].filter(t => t.done).length} 完成`),
+                    h('button', {
+                      onClick: () => {
+                        const proj = projects.find(p => p.id === pid);
+                        if (proj) { setShowAllTasks(false); setActiveProject(proj); setTab('tasks'); setMobileView('list'); }
+                      },
+                      style: { marginLeft: 'auto', fontSize: 11, color: '#0d9488', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px' }
+                    }, '進入專案 →')
+                  ),
+                  ...byProject[pid].map(t => renderAllTaskItem(t))
+                )
+              )
+        )
+      )
+    );
+  }
 
   // 垃圾桶視圖
   if (showTrash) {
@@ -3065,7 +3222,7 @@ function App() {
       };
       const isRow = !!bodyRef.current?.querySelector(`img[data-inline="${selImg.imgId}"]`)?.classList.contains('img-row');
       return h(React.Fragment, null,
-        h('div', { className: 'no-print', onMouseDown: e => e.preventDefault(),
+        h('div', { className: 'no-print', onPointerDown: e => { if (e.pointerType === 'mouse') e.preventDefault(); },
           style: { position: 'fixed', top: Math.max(4, r.top - 40), left: r.left, zIndex: 400,
             background: '#1f2937', borderRadius: 6, padding: '2px 4px', display: 'flex', alignItems: 'center', gap: 1,
             boxShadow: '0 2px 8px rgba(0,0,0,0.4)', whiteSpace: 'nowrap' } },
