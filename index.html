@@ -96,9 +96,7 @@
     "firebase/app": "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js",
     "firebase/auth": "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js",
     "firebase/firestore": "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js",
-    "docx": "https://esm.sh/docx@8.5.0",
-    "jspdf": "https://esm.sh/jspdf@2.5.2",
-    "html2canvas": "https://esm.sh/html2canvas@1.4.1"
+    "docx": "https://esm.sh/docx@8.5.0"
   }
 }
 </script>
@@ -111,8 +109,6 @@ import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore, collection, query, orderBy, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, serverTimestamp, writeBatch, getDocs, deleteField, limit } from "firebase/firestore";
 import { Document, Paragraph, TextRun, ImageRun, HeadingLevel, Packer } from "docx";
-import { jsPDF } from "jspdf";
-import html2canvas from "html2canvas";
 
 // ════════════════════════════════════════════════════════════════
 const firebaseConfig = {
@@ -125,7 +121,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/09 11:36";
+const BUILD_TIME = "2026/07/09 11:48";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -145,19 +141,6 @@ try {
   }
 }
 const googleProvider = new GoogleAuthProvider();
-
-// 手機（尤其是加到主畫面的獨立模式）儲存空間不足時，Firestore 本機快取會進入
-// 無法復原的「已終止」狀態，之後任何操作都會拋出同一個錯誤。
-// 這種情況只能重新整理頁面讓 Firestore 重新初始化，不能單純重試。
-const isFatalDbError = (err) => /already been terminated/i.test(err?.message || '');
-const reportDbError = (label, err) => {
-  if (isFatalDbError(err)) {
-    alert(`${label}：本機資料庫發生問題，即將重新整理頁面以修復，請重新整理後再試一次。`);
-    location.reload();
-    return;
-  }
-  alert(`${label}：${err.message}`);
-};
 
 const h = React.createElement;
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -1249,7 +1232,6 @@ function App() {
   const [creatingProj, setCreatingProj] = useState(false);
   const [confirmDel, setConfirmDel] = useState(null);
   const [uploading, setUploading] = useState(false);
-  const [pdfExporting, setPdfExporting] = useState(false);
   const [tab, setTab] = useState('notes');
   const [showTrash, setShowTrash] = useState(false);
   const [newTaskModal, setNewTaskModal] = useState(false);
@@ -1293,7 +1275,6 @@ function App() {
   const bodyUndoStack      = useRef([]);
   const bodyUndoLastPush   = useRef(0);
   const bodyRef            = useRef(null);
-  const imgGridRef         = useRef(null);
   const [canBodyUndo, setCanBodyUndo] = useState(false);
   const [fontColor, setFontColor] = useState('#111827');
   const [inlineFontSize, setInlineFontSize] = useState(16);
@@ -1482,7 +1463,7 @@ function App() {
       setActiveProject({ id: docRef.id, name });
       setActiveNote(null);
       setMobileView('list'); // 建立完自動切換到列表
-    } catch (err) { reportDbError("新增專案失敗", err); }
+    } catch (err) { alert("新增專案失敗：" + err.message); }
   };
   const renameProject = async (id, name) => {
     await updateDoc(doc(db, `users/${user.uid}/projects/${id}`), { name });
@@ -1545,7 +1526,7 @@ function App() {
       const docRef = await addDoc(collection(db, `users/${user.uid}/notes`), newNote);
       setActiveNote({ id: docRef.id, ...newNote });
       setMobileView('editor'); // 新增筆記後，手機自動切到編輯畫面
-    } catch (err) { reportDbError("新增筆記失敗", err); }
+    } catch (err) { alert("新增筆記失敗：" + err.message); }
   };
   
   const updateNoteFields = (patch) => {
@@ -1573,7 +1554,7 @@ function App() {
     } catch (err) {
       isDirty.current = true;
       setSaveStatus('unsaved');
-      reportDbError('儲存失敗', err);
+      alert('儲存失敗：' + err.message);
     }
   };
 
@@ -1584,7 +1565,7 @@ function App() {
       await updateDoc(doc(db, `users/${user.uid}/notes/${activeNote.id}`), { ...patch, updated: serverTimestamp() });
     } catch (err) {
       if (err.message.includes('exceeds')) alert("筆記太大了（超過 1MB）。請刪除幾張照片。");
-      else reportDbError("儲存失敗", err);
+      else alert("儲存失敗：" + err.message);
       throw err;
     }
   };
@@ -1638,67 +1619,11 @@ function App() {
       setTimeout(() => setCopyFeedback(false), 1800);
     });
   };
-  const exportToPDF = async () => {
-    const title = activeNote?.title || '未命名筆記';
-    if (!bodyRef.current) return;
-    setPdfExporting(true);
-    try {
-      // 直接截圖畫面上實際渲染出來的筆記內容，字級、顏色、螢光筆、
-      // 使用者手動調整過的照片尺寸都會 100% 跟畫面一致（代價是文字無法反白/搜尋）。
-      const scale = 2;
-      const bodyCanvas = await html2canvas(bodyRef.current, { scale, backgroundColor: '#ffffff', useCORS: true });
-      const gridCanvas = imgGridRef.current
-        ? await html2canvas(imgGridRef.current, { scale, backgroundColor: '#ffffff', useCORS: true })
-        : null;
-
-      const gap = 16 * scale;
-      const titleH = 60 * scale;
-      const contentW = bodyCanvas.width;
-      const totalH = titleH + bodyCanvas.height + (gridCanvas ? gap + gridCanvas.height : 0);
-
-      const combined = document.createElement('canvas');
-      combined.width = contentW;
-      combined.height = totalH;
-      const ctx = combined.getContext('2d');
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, contentW, totalH);
-      ctx.fillStyle = '#1f2937';
-      ctx.font = `bold ${28 * scale}px sans-serif`;
-      ctx.textBaseline = 'middle';
-      ctx.fillText(title, 4 * scale, titleH / 2);
-
-      let offsetY = titleH;
-      ctx.drawImage(bodyCanvas, 0, offsetY);
-      offsetY += bodyCanvas.height;
-      if (gridCanvas) { offsetY += gap; ctx.drawImage(gridCanvas, 0, offsetY); }
-
-      const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
-      const pageW = doc.internal.pageSize.getWidth();
-      const pageH = doc.internal.pageSize.getHeight();
-      const margin = 24;
-      const printW = pageW - margin * 2;
-      const pxToPt = printW / combined.width;
-      const pagePxH = (pageH - margin * 2) / pxToPt;
-
-      let y = 0, first = true;
-      while (y < combined.height) {
-        const sliceH = Math.min(pagePxH, combined.height - y);
-        const pageCanvas = document.createElement('canvas');
-        pageCanvas.width = combined.width;
-        pageCanvas.height = sliceH;
-        pageCanvas.getContext('2d').drawImage(combined, 0, y, combined.width, sliceH, 0, 0, combined.width, sliceH);
-        if (!first) doc.addPage();
-        doc.addImage(pageCanvas.toDataURL('image/jpeg', 0.85), 'JPEG', margin, margin, printW, sliceH * pxToPt);
-        y += sliceH;
-        first = false;
-      }
-
-      doc.save(`${title}.pdf`);
-    } catch (err) {
-      alert('匯出PDF失敗：' + err.message);
-    } finally {
-      setPdfExporting(false);
-    }
+  const exportToPDF = () => {
+    const prev = document.title;
+    document.title = activeNote?.title || '未命名筆記';
+    window.addEventListener('afterprint', () => { document.title = prev; }, { once: true });
+    window.print();
   };
 
   const exportToWord = async () => {
@@ -1862,7 +1787,7 @@ function App() {
       const newCount = noteImages.length + files.length;
       await updateDoc(doc(db, `users/${user.uid}/notes/${activeNote.id}`), { imageCount: newCount, updated: serverTimestamp() });
       updateNoteFields({ imageCount: newCount });
-    } catch (err) { reportDbError('加入照片失敗', err); }
+    } catch (err) { alert('加入照片失敗：' + err.message); }
     finally { setUploading(false); }
   };
   const saveAnnotation = async ({ strokes, grayscale, dataUrl }) => {
@@ -1927,7 +1852,7 @@ function App() {
     try {
       const newDataUrl = await rotateImageData(img.dataUrl, deg);
       await updateDoc(imgDoc(imgId), { dataUrl: newDataUrl, strokes: [] });
-    } catch (err) { reportDbError('旋轉失敗', err); }
+    } catch (err) { alert('旋轉失敗：' + err.message); }
   };
 
   const onPickTaskImage = async (taskId, e) => {
@@ -1942,7 +1867,7 @@ function App() {
         newImages.push({ id: uid(), dataUrl, strokes: [], grayscale: false });
       }
       await updateDoc(doc(db, `users/${user.uid}/tasks/${taskId}`), { images: newImages });
-    } catch (err) { reportDbError('加入照片失敗', err); }
+    } catch (err) { alert('加入照片失敗：' + err.message); }
   };
   const delTaskImage = async (taskId, imgIndex) => {
     const task = tasks.find(t => t.id === taskId);
@@ -1957,7 +1882,7 @@ function App() {
       const newDataUrl = await rotateImageData(task.images[imgIndex].dataUrl, deg);
       const newImages = task.images.map((im, i) => i === imgIndex ? { ...im, dataUrl: newDataUrl, strokes: [] } : im);
       await updateDoc(doc(db, `users/${user.uid}/tasks/${taskId}`), { images: newImages });
-    } catch (err) { reportDbError('旋轉失敗', err); }
+    } catch (err) { alert('旋轉失敗：' + err.message); }
   };
 
   // Tasks
@@ -1978,7 +1903,7 @@ function App() {
       setNewTaskModal(false);
     } catch (err) {
       if (err.message === "連線逾時") alert("新增失敗：連線逾時！\n\n👉 請檢查 Firebase 連線狀態。");
-      else reportDbError("新增任務失敗", err);
+      else alert("新增任務失敗：" + err.message);
       throw err;
     }
   };
@@ -2117,7 +2042,7 @@ function App() {
       URL.revokeObjectURL(url);
       localStorage.setItem(BACKUP_LS_KEY, Date.now().toString());
       alert(`✅ 備份完成！\n\n專案 ${data.projects.length} 個、筆記 ${data.notes.length} 筆、任務 ${data.tasks.length} 個。\n\n請妥善保存備份檔案。`);
-    } catch (err) { reportDbError('備份失敗', err); }
+    } catch (err) { alert('備份失敗：' + err.message); }
     finally { setBackupLoading(false); }
   };
 
@@ -2170,7 +2095,7 @@ function App() {
         }
       }
       alert(`✅ 還原完成！共新增 ${items.length} 筆資料。`);
-    } catch (err) { reportDbError('還原失敗', err); }
+    } catch (err) { alert('還原失敗：' + err.message); }
     finally { setBackupLoading(false); }
   };
 
@@ -3017,7 +2942,7 @@ function App() {
               h('div', { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
                 h('button', { onClick: manualSaveNote, style: { ...S.primaryBtnSm, background: '#3b82f6' } }, '💾 儲存'),
                 h('button', { onClick: copyNoteText, title: '複製全部文字內容', style: { ...S.ghostBtn, color: copyFeedback ? '#059669' : undefined } }, copyFeedback ? '✓ 已複製' : '📋 複製全文'),
-                h('button', { onClick: exportToPDF, disabled: pdfExporting, title: '匯出為 PDF', style: { ...S.ghostBtn, opacity: pdfExporting ? 0.6 : 1 } }, pdfExporting ? '⏳ 產生中...' : '📄 匯出 PDF'),
+                h('button', { onClick: exportToPDF, title: '匯出為 PDF', style: S.ghostBtn }, '📄 匯出 PDF'),
                 h('button', { onClick: exportToWord, title: '匯出為 Word (.docx)', style: S.ghostBtn }, '📝 匯出 Word'),
 
                 // 👇 使用 HTML 原生 <label> 解決手機瀏覽器阻擋相簿的問題
@@ -3256,7 +3181,7 @@ function App() {
                   minHeight: bodyExpanded ? 'calc(100vh - 340px)' : 150, overflow: 'auto', resize: 'none' }
               })
             ),
-            (noteImages.length > 0) && h('div', { ref: imgGridRef, style: S.imgGrid },
+            (noteImages.length > 0) && h('div', { style: S.imgGrid },
               ...noteImages.map((im, i) =>
                 h(ImageCard, { key: im.id, image: im, index: i,
                   onView: () => setLightbox(im),
