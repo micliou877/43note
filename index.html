@@ -96,7 +96,8 @@
     "firebase/app": "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js",
     "firebase/auth": "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js",
     "firebase/firestore": "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js",
-    "docx": "https://esm.sh/docx@8.5.0"
+    "docx": "https://esm.sh/docx@8.5.0",
+    "jspdf": "https://esm.sh/jspdf@2.5.2"
   }
 }
 </script>
@@ -109,6 +110,7 @@ import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore, collection, query, orderBy, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, serverTimestamp, writeBatch, getDocs, deleteField, limit } from "firebase/firestore";
 import { Document, Paragraph, TextRun, ImageRun, HeadingLevel, Packer } from "docx";
+import { jsPDF } from "jspdf";
 
 // ════════════════════════════════════════════════════════════════
 const firebaseConfig = {
@@ -121,7 +123,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/08 09:24";
+const BUILD_TIME = "2026/07/09 10:03";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -141,6 +143,19 @@ try {
   }
 }
 const googleProvider = new GoogleAuthProvider();
+
+// 手機（尤其是加到主畫面的獨立模式）儲存空間不足時，Firestore 本機快取會進入
+// 無法復原的「已終止」狀態，之後任何操作都會拋出同一個錯誤。
+// 這種情況只能重新整理頁面讓 Firestore 重新初始化，不能單純重試。
+const isFatalDbError = (err) => /already been terminated/i.test(err?.message || '');
+const reportDbError = (label, err) => {
+  if (isFatalDbError(err)) {
+    alert(`${label}：本機資料庫發生問題，即將重新整理頁面以修復，請重新整理後再試一次。`);
+    location.reload();
+    return;
+  }
+  alert(`${label}：${err.message}`);
+};
 
 const h = React.createElement;
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -1463,7 +1478,7 @@ function App() {
       setActiveProject({ id: docRef.id, name });
       setActiveNote(null);
       setMobileView('list'); // 建立完自動切換到列表
-    } catch (err) { alert("新增專案失敗：" + err.message); }
+    } catch (err) { reportDbError("新增專案失敗", err); }
   };
   const renameProject = async (id, name) => {
     await updateDoc(doc(db, `users/${user.uid}/projects/${id}`), { name });
@@ -1526,7 +1541,7 @@ function App() {
       const docRef = await addDoc(collection(db, `users/${user.uid}/notes`), newNote);
       setActiveNote({ id: docRef.id, ...newNote });
       setMobileView('editor'); // 新增筆記後，手機自動切到編輯畫面
-    } catch (err) { alert("新增筆記失敗：" + err.message); }
+    } catch (err) { reportDbError("新增筆記失敗", err); }
   };
   
   const updateNoteFields = (patch) => {
@@ -1554,7 +1569,7 @@ function App() {
     } catch (err) {
       isDirty.current = true;
       setSaveStatus('unsaved');
-      alert('儲存失敗：' + err.message);
+      reportDbError('儲存失敗', err);
     }
   };
 
@@ -1565,7 +1580,7 @@ function App() {
       await updateDoc(doc(db, `users/${user.uid}/notes/${activeNote.id}`), { ...patch, updated: serverTimestamp() });
     } catch (err) {
       if (err.message.includes('exceeds')) alert("筆記太大了（超過 1MB）。請刪除幾張照片。");
-      else alert("儲存失敗：" + err.message);
+      else reportDbError("儲存失敗", err);
       throw err;
     }
   };
@@ -1619,11 +1634,105 @@ function App() {
       setTimeout(() => setCopyFeedback(false), 1800);
     });
   };
-  const exportToPDF = () => {
-    const prev = document.title;
-    document.title = activeNote?.title || '未命名筆記';
-    window.addEventListener('afterprint', () => { document.title = prev; }, { once: true });
-    window.print();
+  const exportToPDF = async () => {
+    const title = activeNote?.title || '未命名筆記';
+    const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const marginX = 48, marginTop = 56, marginBottom = 56;
+    const contentW = pageW - marginX * 2;
+    let y = marginTop;
+
+    const ensureSpace = (h) => {
+      if (y + h > pageH - marginBottom) { doc.addPage(); y = marginTop; }
+    };
+
+    const writeLines = (text, size, bold, extraIndent = 0) => {
+      doc.setFont('helvetica', bold ? 'bold' : 'normal');
+      doc.setFontSize(size);
+      const lines = doc.splitTextToSize(text, contentW - extraIndent);
+      const lh = size * 1.4;
+      for (const line of lines) {
+        ensureSpace(lh);
+        doc.text(line, marginX + extraIndent, y);
+        y += lh;
+      }
+    };
+
+    const getImgPixelSize = (dataUrl) => new Promise(res => {
+      const img = new Image();
+      img.onload = () => res({ w: img.naturalWidth || 400, h: img.naturalHeight || 300 });
+      img.onerror = () => res({ w: 400, h: 300 });
+      img.src = dataUrl;
+    });
+
+    const getImgFormat = (dataUrl) => {
+      const m = dataUrl.match(/^data:image\/([^;]+);/);
+      const t = m ? m[1].toUpperCase() : 'JPEG';
+      return t === 'JPG' ? 'JPEG' : t;
+    };
+
+    const addImg = async (dataUrl) => {
+      if (!dataUrl?.startsWith('data:')) return;
+      const { w, h } = await getImgPixelSize(dataUrl);
+      const dispW = Math.min(contentW, w);
+      const dispH = dispW * (h / w);
+      ensureSpace(dispH + 8);
+      try { doc.addImage(dataUrl, getImgFormat(dataUrl), marginX, y, dispW, dispH); } catch (e) {}
+      y += dispH + 8;
+    };
+
+    writeLines(title, 20, true);
+    y += 8;
+
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = activeNote?.body || '';
+
+    const processNode = async (node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const t = node.textContent;
+        if (t.trim()) writeLines(t, 11, false);
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const tag = node.tagName.toLowerCase();
+
+      if (tag === 'img') { await addImg(node.getAttribute('src') || ''); return; }
+      if (tag === 'br') { y += 11 * 1.4; return; }
+
+      const hasImg = Array.from(node.childNodes).some(n => n.nodeName === 'IMG');
+      if (hasImg) {
+        for (const child of Array.from(node.childNodes)) await processNode(child);
+        return;
+      }
+
+      const text = node.textContent || '';
+      if (!text.trim()) return;
+
+      if (/^h[1-6]$/.test(tag)) {
+        const sizes = [18, 16, 14.5, 13, 12, 11.5];
+        writeLines(text, sizes[parseInt(tag[1]) - 1], true);
+      } else if (tag === 'blockquote') {
+        writeLines(text, 11, false, 24);
+      } else if (node.classList?.contains('li3')) {
+        writeLines('▪ ' + text, 11, false, 48);
+      } else if (node.classList?.contains('li2')) {
+        writeLines('◦ ' + text, 11, false, 24);
+      } else if (node.classList?.contains('li1')) {
+        writeLines('• ' + text, 11, false);
+      } else {
+        writeLines(text, 11, false);
+      }
+      y += 2;
+    };
+
+    for (const node of Array.from(tempDiv.childNodes)) await processNode(node);
+
+    for (const im of noteImages) {
+      if (im.dataUrl) await addImg(im.dataUrl);
+    }
+
+    doc.save(`${title}.pdf`);
   };
 
   const exportToWord = async () => {
@@ -1787,7 +1896,7 @@ function App() {
       const newCount = noteImages.length + files.length;
       await updateDoc(doc(db, `users/${user.uid}/notes/${activeNote.id}`), { imageCount: newCount, updated: serverTimestamp() });
       updateNoteFields({ imageCount: newCount });
-    } catch (err) { alert('加入照片失敗：' + err.message); }
+    } catch (err) { reportDbError('加入照片失敗', err); }
     finally { setUploading(false); }
   };
   const saveAnnotation = async ({ strokes, grayscale, dataUrl }) => {
@@ -1852,7 +1961,7 @@ function App() {
     try {
       const newDataUrl = await rotateImageData(img.dataUrl, deg);
       await updateDoc(imgDoc(imgId), { dataUrl: newDataUrl, strokes: [] });
-    } catch (err) { alert('旋轉失敗：' + err.message); }
+    } catch (err) { reportDbError('旋轉失敗', err); }
   };
 
   const onPickTaskImage = async (taskId, e) => {
@@ -1867,7 +1976,7 @@ function App() {
         newImages.push({ id: uid(), dataUrl, strokes: [], grayscale: false });
       }
       await updateDoc(doc(db, `users/${user.uid}/tasks/${taskId}`), { images: newImages });
-    } catch (err) { alert('加入照片失敗：' + err.message); }
+    } catch (err) { reportDbError('加入照片失敗', err); }
   };
   const delTaskImage = async (taskId, imgIndex) => {
     const task = tasks.find(t => t.id === taskId);
@@ -1882,7 +1991,7 @@ function App() {
       const newDataUrl = await rotateImageData(task.images[imgIndex].dataUrl, deg);
       const newImages = task.images.map((im, i) => i === imgIndex ? { ...im, dataUrl: newDataUrl, strokes: [] } : im);
       await updateDoc(doc(db, `users/${user.uid}/tasks/${taskId}`), { images: newImages });
-    } catch (err) { alert('旋轉失敗：' + err.message); }
+    } catch (err) { reportDbError('旋轉失敗', err); }
   };
 
   // Tasks
@@ -1903,7 +2012,7 @@ function App() {
       setNewTaskModal(false);
     } catch (err) {
       if (err.message === "連線逾時") alert("新增失敗：連線逾時！\n\n👉 請檢查 Firebase 連線狀態。");
-      else alert("新增任務失敗：" + err.message);
+      else reportDbError("新增任務失敗", err);
       throw err;
     }
   };
@@ -2042,7 +2151,7 @@ function App() {
       URL.revokeObjectURL(url);
       localStorage.setItem(BACKUP_LS_KEY, Date.now().toString());
       alert(`✅ 備份完成！\n\n專案 ${data.projects.length} 個、筆記 ${data.notes.length} 筆、任務 ${data.tasks.length} 個。\n\n請妥善保存備份檔案。`);
-    } catch (err) { alert('備份失敗：' + err.message); }
+    } catch (err) { reportDbError('備份失敗', err); }
     finally { setBackupLoading(false); }
   };
 
@@ -2095,7 +2204,7 @@ function App() {
         }
       }
       alert(`✅ 還原完成！共新增 ${items.length} 筆資料。`);
-    } catch (err) { alert('還原失敗：' + err.message); }
+    } catch (err) { reportDbError('還原失敗', err); }
     finally { setBackupLoading(false); }
   };
 
