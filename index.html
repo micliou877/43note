@@ -97,7 +97,8 @@
     "firebase/auth": "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js",
     "firebase/firestore": "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js",
     "docx": "https://esm.sh/docx@8.5.0",
-    "jspdf": "https://esm.sh/jspdf@2.5.2"
+    "jspdf": "https://esm.sh/jspdf@2.5.2",
+    "html2canvas": "https://esm.sh/html2canvas@1.4.1"
   }
 }
 </script>
@@ -111,6 +112,7 @@ import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signI
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore, collection, query, orderBy, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, serverTimestamp, writeBatch, getDocs, deleteField, limit } from "firebase/firestore";
 import { Document, Paragraph, TextRun, ImageRun, HeadingLevel, Packer } from "docx";
 import { jsPDF } from "jspdf";
+import html2canvas from "html2canvas";
 
 // ════════════════════════════════════════════════════════════════
 const firebaseConfig = {
@@ -123,7 +125,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/09 10:31";
+const BUILD_TIME = "2026/07/09 11:36";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -143,29 +145,6 @@ try {
   }
 }
 const googleProvider = new GoogleAuthProvider();
-
-// jsPDF 內建字型不含中文字，匯出PDF需內嵌中文字型才不會變亂碼。
-// jf-openhuninn（粉圓體，SIL OFL 授權）是少數以 TrueType(glyf) 格式釋出的中文字型，
-// jsPDF 只能解析 glyf 外框，多數中文字型（如思源黑體）是 CFF/OTF 格式而無法內嵌。
-const CJK_FONT_URL = "https://cdn.jsdelivr.net/gh/justfont/open-huninn-font@2.1/font/jf-openhuninn-2.1.ttf";
-let cjkFontPromise = null;
-const loadCjkFontBase64 = () => {
-  if (!cjkFontPromise) {
-    cjkFontPromise = fetch(CJK_FONT_URL)
-      .then(r => r.arrayBuffer())
-      .then(buf => {
-        const bytes = new Uint8Array(buf);
-        let binary = '';
-        const chunk = 0x8000;
-        for (let i = 0; i < bytes.length; i += chunk) {
-          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
-        }
-        return btoa(binary);
-      })
-      .catch(err => { cjkFontPromise = null; throw err; });
-  }
-  return cjkFontPromise;
-};
 
 // 手機（尤其是加到主畫面的獨立模式）儲存空間不足時，Firestore 本機快取會進入
 // 無法復原的「已終止」狀態，之後任何操作都會拋出同一個錯誤。
@@ -1314,6 +1293,7 @@ function App() {
   const bodyUndoStack      = useRef([]);
   const bodyUndoLastPush   = useRef(0);
   const bodyRef            = useRef(null);
+  const imgGridRef         = useRef(null);
   const [canBodyUndo, setCanBodyUndo] = useState(false);
   const [fontColor, setFontColor] = useState('#111827');
   const [inlineFontSize, setInlineFontSize] = useState(16);
@@ -1660,117 +1640,60 @@ function App() {
   };
   const exportToPDF = async () => {
     const title = activeNote?.title || '未命名筆記';
+    if (!bodyRef.current) return;
     setPdfExporting(true);
-    let fontBase64;
     try {
-      fontBase64 = await loadCjkFontBase64();
-    } catch (err) {
-      setPdfExporting(false);
-      alert('匯出PDF失敗：中文字型下載失敗，請檢查網路連線後再試一次。');
-      return;
-    }
+      // 直接截圖畫面上實際渲染出來的筆記內容，字級、顏色、螢光筆、
+      // 使用者手動調整過的照片尺寸都會 100% 跟畫面一致（代價是文字無法反白/搜尋）。
+      const scale = 2;
+      const bodyCanvas = await html2canvas(bodyRef.current, { scale, backgroundColor: '#ffffff', useCORS: true });
+      const gridCanvas = imgGridRef.current
+        ? await html2canvas(imgGridRef.current, { scale, backgroundColor: '#ffffff', useCORS: true })
+        : null;
 
-    try {
-    const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
-    doc.addFileToVFS('jf-openhuninn.ttf', fontBase64);
-    doc.addFont('jf-openhuninn.ttf', 'OpenHuninn', 'normal');
-    doc.addFont('jf-openhuninn.ttf', 'OpenHuninn', 'bold'); // 此字型無粗體字重，僅用標題字級做區隔
-    const pageW = doc.internal.pageSize.getWidth();
-    const pageH = doc.internal.pageSize.getHeight();
-    const marginX = 48, marginTop = 56, marginBottom = 56;
-    const contentW = pageW - marginX * 2;
-    let y = marginTop;
+      const gap = 16 * scale;
+      const titleH = 60 * scale;
+      const contentW = bodyCanvas.width;
+      const totalH = titleH + bodyCanvas.height + (gridCanvas ? gap + gridCanvas.height : 0);
 
-    const ensureSpace = (h) => {
-      if (y + h > pageH - marginBottom) { doc.addPage(); y = marginTop; }
-    };
+      const combined = document.createElement('canvas');
+      combined.width = contentW;
+      combined.height = totalH;
+      const ctx = combined.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, contentW, totalH);
+      ctx.fillStyle = '#1f2937';
+      ctx.font = `bold ${28 * scale}px sans-serif`;
+      ctx.textBaseline = 'middle';
+      ctx.fillText(title, 4 * scale, titleH / 2);
 
-    const writeLines = (text, size, bold, extraIndent = 0) => {
-      doc.setFont('OpenHuninn', bold ? 'bold' : 'normal');
-      doc.setFontSize(size);
-      const lines = doc.splitTextToSize(text, contentW - extraIndent);
-      const lh = size * 1.4;
-      for (const line of lines) {
-        ensureSpace(lh);
-        doc.text(line, marginX + extraIndent, y);
-        y += lh;
-      }
-    };
+      let offsetY = titleH;
+      ctx.drawImage(bodyCanvas, 0, offsetY);
+      offsetY += bodyCanvas.height;
+      if (gridCanvas) { offsetY += gap; ctx.drawImage(gridCanvas, 0, offsetY); }
 
-    const getImgPixelSize = (dataUrl) => new Promise(res => {
-      const img = new Image();
-      img.onload = () => res({ w: img.naturalWidth || 400, h: img.naturalHeight || 300 });
-      img.onerror = () => res({ w: 400, h: 300 });
-      img.src = dataUrl;
-    });
+      const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const margin = 24;
+      const printW = pageW - margin * 2;
+      const pxToPt = printW / combined.width;
+      const pagePxH = (pageH - margin * 2) / pxToPt;
 
-    const getImgFormat = (dataUrl) => {
-      const m = dataUrl.match(/^data:image\/([^;]+);/);
-      const t = m ? m[1].toUpperCase() : 'JPEG';
-      return t === 'JPG' ? 'JPEG' : t;
-    };
-
-    const addImg = async (dataUrl) => {
-      if (!dataUrl?.startsWith('data:')) return;
-      const { w, h } = await getImgPixelSize(dataUrl);
-      const dispW = Math.min(contentW, w);
-      const dispH = dispW * (h / w);
-      ensureSpace(dispH + 8);
-      try { doc.addImage(dataUrl, getImgFormat(dataUrl), marginX, y, dispW, dispH); } catch (e) {}
-      y += dispH + 8;
-    };
-
-    writeLines(title, 20, true);
-    y += 8;
-
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = activeNote?.body || '';
-
-    const processNode = async (node) => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        const t = node.textContent;
-        if (t.trim()) writeLines(t, 11, false);
-        return;
-      }
-      if (node.nodeType !== Node.ELEMENT_NODE) return;
-      const tag = node.tagName.toLowerCase();
-
-      if (tag === 'img') { await addImg(node.getAttribute('src') || ''); return; }
-      if (tag === 'br') { y += 11 * 1.4; return; }
-
-      const hasImg = Array.from(node.childNodes).some(n => n.nodeName === 'IMG');
-      if (hasImg) {
-        for (const child of Array.from(node.childNodes)) await processNode(child);
-        return;
+      let y = 0, first = true;
+      while (y < combined.height) {
+        const sliceH = Math.min(pagePxH, combined.height - y);
+        const pageCanvas = document.createElement('canvas');
+        pageCanvas.width = combined.width;
+        pageCanvas.height = sliceH;
+        pageCanvas.getContext('2d').drawImage(combined, 0, y, combined.width, sliceH, 0, 0, combined.width, sliceH);
+        if (!first) doc.addPage();
+        doc.addImage(pageCanvas.toDataURL('image/jpeg', 0.85), 'JPEG', margin, margin, printW, sliceH * pxToPt);
+        y += sliceH;
+        first = false;
       }
 
-      const text = node.textContent || '';
-      if (!text.trim()) return;
-
-      if (/^h[1-6]$/.test(tag)) {
-        const sizes = [18, 16, 14.5, 13, 12, 11.5];
-        writeLines(text, sizes[parseInt(tag[1]) - 1], true);
-      } else if (tag === 'blockquote') {
-        writeLines(text, 11, false, 24);
-      } else if (node.classList?.contains('li3')) {
-        writeLines('▪ ' + text, 11, false, 48);
-      } else if (node.classList?.contains('li2')) {
-        writeLines('◦ ' + text, 11, false, 24);
-      } else if (node.classList?.contains('li1')) {
-        writeLines('• ' + text, 11, false);
-      } else {
-        writeLines(text, 11, false);
-      }
-      y += 2;
-    };
-
-    for (const node of Array.from(tempDiv.childNodes)) await processNode(node);
-
-    for (const im of noteImages) {
-      if (im.dataUrl) await addImg(im.dataUrl);
-    }
-
-    doc.save(`${title}.pdf`);
+      doc.save(`${title}.pdf`);
     } catch (err) {
       alert('匯出PDF失敗：' + err.message);
     } finally {
@@ -3333,7 +3256,7 @@ function App() {
                   minHeight: bodyExpanded ? 'calc(100vh - 340px)' : 150, overflow: 'auto', resize: 'none' }
               })
             ),
-            (noteImages.length > 0) && h('div', { style: S.imgGrid },
+            (noteImages.length > 0) && h('div', { ref: imgGridRef, style: S.imgGrid },
               ...noteImages.map((im, i) =>
                 h(ImageCard, { key: im.id, image: im, index: i,
                   onView: () => setLightbox(im),
