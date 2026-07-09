@@ -121,7 +121,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/09 11:48";
+const BUILD_TIME = "2026/07/09 12:31";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -141,6 +141,17 @@ try {
   }
 }
 const googleProvider = new GoogleAuthProvider();
+
+// 手機（尤其是加到主畫面的獨立模式）儲存空間不足時，Firestore 本機快取會進入
+// 無法復原的「已終止」狀態，之後任何操作都會拋出同一個錯誤，只能重新整理頁面復原。
+const reportDbError = (label, err) => {
+  if (/already been terminated/i.test(err?.message || '')) {
+    alert(`${label}：本機資料庫發生問題，即將重新整理頁面以修復，請重新整理後再試一次。`);
+    location.reload();
+    return;
+  }
+  alert(`${label}：${err.message}`);
+};
 
 const h = React.createElement;
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -1787,7 +1798,7 @@ function App() {
       const newCount = noteImages.length + files.length;
       await updateDoc(doc(db, `users/${user.uid}/notes/${activeNote.id}`), { imageCount: newCount, updated: serverTimestamp() });
       updateNoteFields({ imageCount: newCount });
-    } catch (err) { alert('加入照片失敗：' + err.message); }
+    } catch (err) { reportDbError('加入照片失敗', err); }
     finally { setUploading(false); }
   };
   const saveAnnotation = async ({ strokes, grayscale, dataUrl }) => {
@@ -1867,7 +1878,7 @@ function App() {
         newImages.push({ id: uid(), dataUrl, strokes: [], grayscale: false });
       }
       await updateDoc(doc(db, `users/${user.uid}/tasks/${taskId}`), { images: newImages });
-    } catch (err) { alert('加入照片失敗：' + err.message); }
+    } catch (err) { reportDbError('加入照片失敗', err); }
   };
   const delTaskImage = async (taskId, imgIndex) => {
     const task = tasks.find(t => t.id === taskId);
