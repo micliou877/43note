@@ -121,7 +121,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/09 12:31";
+const BUILD_TIME = "2026/07/09 17:05";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -3270,7 +3270,7 @@ function App() {
       });
       const im = annotating.type === 'task'
         ? tasks.find(t => t.id === annotating.id)?.images[annotating.imgIndex]
-        : activeNote?.images[annotating.imgIndex];
+        : noteImages[annotating.imgIndex];
       return im ? h(PhotoAnnotator, {
         src: im.dataUrl, initialStrokes: im.strokes || [], initialGrayscale: !!im.grayscale,
         onSave: saveAnnotation, onClose: () => setAnnotating(null)
