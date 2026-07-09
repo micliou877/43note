@@ -123,7 +123,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/09 10:03";
+const BUILD_TIME = "2026/07/09 10:31";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -143,6 +143,29 @@ try {
   }
 }
 const googleProvider = new GoogleAuthProvider();
+
+// jsPDF 內建字型不含中文字，匯出PDF需內嵌中文字型才不會變亂碼。
+// jf-openhuninn（粉圓體，SIL OFL 授權）是少數以 TrueType(glyf) 格式釋出的中文字型，
+// jsPDF 只能解析 glyf 外框，多數中文字型（如思源黑體）是 CFF/OTF 格式而無法內嵌。
+const CJK_FONT_URL = "https://cdn.jsdelivr.net/gh/justfont/open-huninn-font@2.1/font/jf-openhuninn-2.1.ttf";
+let cjkFontPromise = null;
+const loadCjkFontBase64 = () => {
+  if (!cjkFontPromise) {
+    cjkFontPromise = fetch(CJK_FONT_URL)
+      .then(r => r.arrayBuffer())
+      .then(buf => {
+        const bytes = new Uint8Array(buf);
+        let binary = '';
+        const chunk = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunk) {
+          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+        }
+        return btoa(binary);
+      })
+      .catch(err => { cjkFontPromise = null; throw err; });
+  }
+  return cjkFontPromise;
+};
 
 // 手機（尤其是加到主畫面的獨立模式）儲存空間不足時，Firestore 本機快取會進入
 // 無法復原的「已終止」狀態，之後任何操作都會拋出同一個錯誤。
@@ -1247,6 +1270,7 @@ function App() {
   const [creatingProj, setCreatingProj] = useState(false);
   const [confirmDel, setConfirmDel] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [pdfExporting, setPdfExporting] = useState(false);
   const [tab, setTab] = useState('notes');
   const [showTrash, setShowTrash] = useState(false);
   const [newTaskModal, setNewTaskModal] = useState(false);
@@ -1636,7 +1660,21 @@ function App() {
   };
   const exportToPDF = async () => {
     const title = activeNote?.title || '未命名筆記';
-    const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+    setPdfExporting(true);
+    let fontBase64;
+    try {
+      fontBase64 = await loadCjkFontBase64();
+    } catch (err) {
+      setPdfExporting(false);
+      alert('匯出PDF失敗：中文字型下載失敗，請檢查網路連線後再試一次。');
+      return;
+    }
+
+    try {
+    const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
+    doc.addFileToVFS('jf-openhuninn.ttf', fontBase64);
+    doc.addFont('jf-openhuninn.ttf', 'OpenHuninn', 'normal');
+    doc.addFont('jf-openhuninn.ttf', 'OpenHuninn', 'bold'); // 此字型無粗體字重，僅用標題字級做區隔
     const pageW = doc.internal.pageSize.getWidth();
     const pageH = doc.internal.pageSize.getHeight();
     const marginX = 48, marginTop = 56, marginBottom = 56;
@@ -1648,7 +1686,7 @@ function App() {
     };
 
     const writeLines = (text, size, bold, extraIndent = 0) => {
-      doc.setFont('helvetica', bold ? 'bold' : 'normal');
+      doc.setFont('OpenHuninn', bold ? 'bold' : 'normal');
       doc.setFontSize(size);
       const lines = doc.splitTextToSize(text, contentW - extraIndent);
       const lh = size * 1.4;
@@ -1733,6 +1771,11 @@ function App() {
     }
 
     doc.save(`${title}.pdf`);
+    } catch (err) {
+      alert('匯出PDF失敗：' + err.message);
+    } finally {
+      setPdfExporting(false);
+    }
   };
 
   const exportToWord = async () => {
@@ -3051,7 +3094,7 @@ function App() {
               h('div', { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
                 h('button', { onClick: manualSaveNote, style: { ...S.primaryBtnSm, background: '#3b82f6' } }, '💾 儲存'),
                 h('button', { onClick: copyNoteText, title: '複製全部文字內容', style: { ...S.ghostBtn, color: copyFeedback ? '#059669' : undefined } }, copyFeedback ? '✓ 已複製' : '📋 複製全文'),
-                h('button', { onClick: exportToPDF, title: '匯出為 PDF', style: S.ghostBtn }, '📄 匯出 PDF'),
+                h('button', { onClick: exportToPDF, disabled: pdfExporting, title: '匯出為 PDF', style: { ...S.ghostBtn, opacity: pdfExporting ? 0.6 : 1 } }, pdfExporting ? '⏳ 產生中...' : '📄 匯出 PDF'),
                 h('button', { onClick: exportToWord, title: '匯出為 Word (.docx)', style: S.ghostBtn }, '📝 匯出 Word'),
 
                 // 👇 使用 HTML 原生 <label> 解決手機瀏覽器阻擋相簿的問題
