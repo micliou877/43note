@@ -121,7 +121,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/10 17:13";
+const BUILD_TIME = "2026/07/10 18:06";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1301,6 +1301,7 @@ function App() {
   const [allTasksFull, setAllTasksFull] = useState([]);
   const [allTasksFilter, setAllTasksFilter] = useState('pending');
   const [overdueModal, setOverdueModal] = useState(null);
+  const [collapsedAllTaskProjects, setCollapsedAllTaskProjects] = useState(new Set());
 
   useEffect(() => {
     const goOnline = () => setIsOffline(false);
@@ -2383,6 +2384,33 @@ function App() {
         h('span', null, '程式更新 ' + BUILD_TIME)
       )
     ),
+    h('button', {
+      onClick: () => {
+        saveIfDirtyRef.current?.();
+        setSaveStatus('idle');
+        setShowAllTasks(v => {
+          const next = !v;
+          setMobileView(next ? 'list' : 'sidebar');
+          return next;
+        });
+        setShowTrash(false);
+        setActiveProject(null); setActiveNote(null);
+      },
+      style: {
+        display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+        padding: '8px 12px', marginBottom: 8, borderRadius: 8, cursor: 'pointer',
+        fontSize: 13, fontWeight: showAllTasks ? 600 : 500, border: '1px solid',
+        background: showAllTasks ? '#f0fdfa' : '#f8fafc',
+        color: showAllTasks ? '#0d9488' : '#374151',
+        borderColor: showAllTasks ? '#0d9488' : '#e5e7eb',
+      }
+    },
+      '☑️ 所有任務',
+      (() => {
+        const cnt = allTasksMeta.filter(t => !t.done && !t.deleted).length;
+        return cnt > 0 && h('span', { style: { marginLeft: 'auto', background: showAllTasks ? '#0d9488' : '#ef4444', color: '#fff', borderRadius: 10, padding: '1px 7px', fontSize: 11, fontWeight: 700 } }, cnt);
+      })()
+    ),
     !showTrash && (creatingProj
       ? h(NewProjectInput, { onConfirm: createProject, onCancel: () => setCreatingProj(false) })
       : creatingProjFolder
@@ -2489,20 +2517,6 @@ function App() {
       },
       style: { ...S.trashBtn, ...(showTrash ? S.trashBtnActive : {}) }
     }, '🗑️ 垃圾桶'),
-    h('button', {
-      onClick: () => {
-        saveIfDirtyRef.current?.();
-        setSaveStatus('idle');
-        setShowAllTasks(v => {
-          const isOpening = !v;
-          setMobileView(isOpening ? 'list' : 'sidebar');
-          return isOpening;
-        });
-        setShowTrash(false);
-        setActiveProject(null); setActiveNote(null);
-      },
-      style: { ...S.trashBtn, ...(showAllTasks ? { background: '#f0fdfa', color: '#0d9488' } : {}) }
-    }, '☑️ 所有任務'),
     (() => {
       const lastBackup = parseInt(localStorage.getItem(BACKUP_LS_KEY) || '0');
       const daysSince = lastBackup ? Math.floor((Date.now() - lastBackup) / 86400000) : null;
@@ -2537,6 +2551,16 @@ function App() {
 
   // 所有任務視圖
   if (showAllTasks) {
+    const PROJECT_PALETTE = [
+      { bg: '#f0fdfa', border: '#0d9488', text: '#0f766e', light: '#ccfbf1' },
+      { bg: '#eff6ff', border: '#3b82f6', text: '#1d4ed8', light: '#dbeafe' },
+      { bg: '#fdf4ff', border: '#8b5cf6', text: '#6d28d9', light: '#ede9fe' },
+      { bg: '#fff7ed', border: '#f97316', text: '#c2410c', light: '#fed7aa' },
+      { bg: '#f0fdf4', border: '#22c55e', text: '#15803d', light: '#bbf7d0' },
+      { bg: '#fdf2f8', border: '#ec4899', text: '#be185d', light: '#fce7f3' },
+      { bg: '#fff1f2', border: '#f43f5e', text: '#be123c', light: '#ffe4e6' },
+      { bg: '#f0f9ff', border: '#0ea5e9', text: '#0369a1', light: '#bae6fd' },
+    ];
     const filteredAllTasks = allTasksFull.filter(t => {
       if (allTasksFilter === 'pending') return !t.done;
       if (allTasksFilter === 'done') return t.done;
@@ -2544,6 +2568,13 @@ function App() {
     });
     const projectMap = {};
     projects.forEach(p => { projectMap[p.id] = p; });
+    // Build byProject using ALL tasks (not just filtered) so collapsed headers always show
+    const byProjectAll = {};
+    allTasksFull.forEach(t => {
+      const pid = t.projectId || '__none__';
+      if (!byProjectAll[pid]) byProjectAll[pid] = [];
+      byProjectAll[pid].push(t);
+    });
     const byProject = {};
     filteredAllTasks.forEach(t => {
       const pid = t.projectId || '__none__';
@@ -2560,6 +2591,14 @@ function App() {
     });
     const pendingTotal = allTasksFull.filter(t => !t.done).length;
     const doneTotal = allTasksFull.filter(t => t.done).length;
+    // Use all projects that have any tasks to keep color assignments stable
+    const allProjectIds = Object.keys(byProjectAll).sort((a, b) => {
+      const aName = (projectMap[a]?.name || '').toLowerCase();
+      const bName = (projectMap[b]?.name || '').toLowerCase();
+      return aName < bName ? -1 : aName > bName ? 1 : 0;
+    });
+    const colorMap = {};
+    allProjectIds.forEach((pid, i) => { colorMap[pid] = PROJECT_PALETTE[i % PROJECT_PALETTE.length]; });
     const projectIds = Object.keys(byProject).sort((a, b) => {
       const aHasPending = byProject[a].some(t => !t.done);
       const bHasPending = byProject[b].some(t => !t.done);
@@ -2569,10 +2608,18 @@ function App() {
       const bName = (projectMap[b]?.name || '').toLowerCase();
       return aName < bName ? -1 : aName > bName ? 1 : 0;
     });
-    const renderAllTaskItem = (t) => h('div', { key: t.id, style: { ...S.taskItem, opacity: t.done ? 0.7 : 1 } },
+    const toggleAllTaskProject = (pid) => {
+      setCollapsedAllTaskProjects(prev => {
+        const next = new Set(prev);
+        if (next.has(pid)) next.delete(pid); else next.add(pid);
+        return next;
+      });
+    };
+    const renderAllTaskItem = (t, palette) => h('div', { key: t.id,
+      style: { ...S.taskItem, opacity: t.done ? 0.7 : 1, borderLeft: `3px solid ${palette.light}`, paddingLeft: 14 } },
       h('div', {
         onClick: () => { if (t.done) uncompleteTask(t.id); else setCompleteTaskId(t.id); },
-        style: { ...S.taskCheck, ...(t.done ? S.taskCheckDone : {}) }
+        style: { ...S.taskCheck, ...(t.done ? S.taskCheckDone : {}), borderColor: t.done ? palette.border : undefined }
       }, t.done ? '✓' : ''),
       h('div', { style: { flex: 1 } },
         h('div', { style: { display: 'flex', alignItems: 'flex-start', gap: 6 } },
@@ -2583,7 +2630,7 @@ function App() {
                   onChange: (e) => setEditingTask({ ...editingTask, title: e.target.value }),
                   onKeyDown: (e) => { if (e.key === 'Enter') updateTaskTitle(editingTask.id, editingTask.title); if (e.key === 'Escape') setEditingTask(null); },
                   onBlur: () => updateTaskTitle(editingTask.id, editingTask.title),
-                  style: { width: '100%', fontSize: 14, border: '1px solid #0d9488', borderRadius: 6, padding: '4px 8px', outline: 'none', color: '#1f2937', background: '#f0fdfa', boxSizing: 'border-box' }
+                  style: { width: '100%', fontSize: 14, border: `1px solid ${palette.border}`, borderRadius: 6, padding: '4px 8px', outline: 'none', color: '#1f2937', background: palette.bg, boxSizing: 'border-box' }
                 })
               : h('div', {
                   style: { ...S.taskTitle, ...(t.done ? S.taskTitleDone : {}), cursor: t.done ? 'default' : 'text' },
@@ -2648,23 +2695,36 @@ function App() {
                 allTasksFilter === 'pending'
                   ? h('div', { style: { textAlign: 'center' } }, h('div', { style: { fontSize: 36, marginBottom: 8 } }, '🎉'), '所有任務都完成了！')
                   : '沒有已完成的任務')
-            : projectIds.map(pid =>
-                h('div', { key: pid },
-                  h('div', { style: { padding: '8px 20px 5px', fontSize: 12.5, fontWeight: 600, color: '#64748b', background: '#f8fafc', borderBottom: '1px solid #f1f5f9', borderTop: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 8 } },
-                    h('span', null, projectMap[pid]?.name || '未知專案'),
-                    h('span', { style: { fontWeight: 400, fontSize: 11, color: '#94a3b8' } },
-                      `${byProject[pid].filter(t => !t.done).length} 待 / ${byProject[pid].filter(t => t.done).length} 完成`),
+            : projectIds.map(pid => {
+                const palette = colorMap[pid] || PROJECT_PALETTE[0];
+                const collapsed = collapsedAllTaskProjects.has(pid);
+                const pendingCnt = byProject[pid].filter(t => !t.done).length;
+                const doneCnt = byProject[pid].filter(t => t.done).length;
+                return h('div', { key: pid, style: { marginBottom: 4 } },
+                  h('div', {
+                    onClick: () => toggleAllTaskProject(pid),
+                    style: { padding: '9px 16px', fontSize: 13, fontWeight: 600,
+                      color: palette.text, background: palette.bg,
+                      borderLeft: `4px solid ${palette.border}`,
+                      display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
+                      userSelect: 'none', borderBottom: `1px solid ${palette.light}` }
+                  },
+                    h('span', { style: { fontSize: 11 } }, collapsed ? '▶' : '▼'),
+                    h('span', { style: { flex: 1 } }, projectMap[pid]?.name || '未知專案'),
+                    pendingCnt > 0 && h('span', { style: { background: palette.border, color: '#fff', borderRadius: 10, padding: '1px 7px', fontSize: 11, fontWeight: 700 } }, pendingCnt),
+                    doneCnt > 0 && h('span', { style: { background: palette.light, color: palette.text, borderRadius: 10, padding: '1px 7px', fontSize: 11 } }, `✓${doneCnt}`),
                     h('button', {
-                      onClick: () => {
+                      onClick: (e) => {
+                        e.stopPropagation();
                         const proj = projects.find(p => p.id === pid);
                         if (proj) { setShowAllTasks(false); setActiveProject(proj); setTab('tasks'); setMobileView('list'); }
                       },
-                      style: { marginLeft: 'auto', fontSize: 11, color: '#0d9488', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px' }
-                    }, '進入專案 →')
+                      style: { fontSize: 11, color: palette.text, background: 'none', border: `1px solid ${palette.border}`, borderRadius: 5, cursor: 'pointer', padding: '2px 7px', marginLeft: 4 }
+                    }, '進入 →')
                   ),
-                  ...byProject[pid].map(t => renderAllTaskItem(t))
-                )
-              )
+                  !collapsed && byProject[pid].map(t => renderAllTaskItem(t, palette))
+                );
+              })
         )
       )
     );
