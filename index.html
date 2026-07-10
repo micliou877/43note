@@ -121,7 +121,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/09 17:05";
+const BUILD_TIME = "2026/07/10 17:13";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1286,6 +1286,7 @@ function App() {
   const bodyUndoStack      = useRef([]);
   const bodyUndoLastPush   = useRef(0);
   const bodyRef            = useRef(null);
+  const overdueAlertShownRef = useRef(false);
   const [canBodyUndo, setCanBodyUndo] = useState(false);
   const [fontColor, setFontColor] = useState('#111827');
   const [inlineFontSize, setInlineFontSize] = useState(16);
@@ -1299,6 +1300,7 @@ function App() {
   const [showAllTasks, setShowAllTasks] = useState(false);
   const [allTasksFull, setAllTasksFull] = useState([]);
   const [allTasksFilter, setAllTasksFilter] = useState('pending');
+  const [overdueModal, setOverdueModal] = useState(null);
 
   useEffect(() => {
     const goOnline = () => setIsOffline(false);
@@ -1416,12 +1418,19 @@ function App() {
   }, [tasks]);
 
   useEffect(() => {
-    if (!user) { setAllTasksMeta([]); return; }
+    if (!user) { setAllTasksMeta([]); overdueAlertShownRef.current = false; return; }
     return onSnapshot(collection(db, `users/${user.uid}/tasks`), (snap) => {
-      setAllTasksMeta(snap.docs.map(d => {
-        const { projectId, dueDate, done, deleted } = d.data();
-        return { id: d.id, projectId, dueDate, done, deleted };
-      }));
+      const list = snap.docs.map(d => {
+        const { projectId, dueDate, done, deleted, title } = d.data();
+        return { id: d.id, projectId, dueDate, done, deleted, title };
+      });
+      setAllTasksMeta(list);
+      if (!overdueAlertShownRef.current) {
+        overdueAlertShownRef.current = true;
+        const now = new Date();
+        const overdue = list.filter(t => !t.done && !t.deleted && t.dueDate && new Date(t.dueDate) < now);
+        if (overdue.length > 0) setOverdueModal(overdue);
+      }
     });
   }, [user]);
 
@@ -2147,6 +2156,43 @@ function App() {
     style: { position: 'fixed', top: 0, left: 0, right: 0, background: '#fef3c7', color: '#92400e', padding: '6px 14px', fontSize: 12.5, textAlign: 'center', zIndex: 300, borderBottom: '1px solid #fde68a' }
   }, '📵 離線模式 — 讀寫正常，資料已存本機，恢復連線後自動同步');
 
+  const overdueModalEl = overdueModal && h('div', { style: { ...S.modalOverlay, zIndex: 600 } },
+    h('div', { style: { ...S.modalCard, maxWidth: 460, display: 'flex', flexDirection: 'column', maxHeight: '80vh' } },
+      h('h3', { style: { ...S.modalTitle, color: '#dc2626', marginBottom: 4 } }, '⏰ 逾期任務提醒'),
+      h('p', { style: S.modalSub }, `有 ${overdueModal.length} 個任務已逾期尚未完成：`),
+      h('div', { style: { overflowY: 'auto', flex: 1, maxHeight: 320, border: '1px solid #fee2e2', borderRadius: 8, marginBottom: 16 } },
+        overdueModal.map(t => {
+          const due = fmtDue(t.dueDate);
+          const projName = projects.find(p => p.id === t.projectId)?.name || '';
+          return h('div', { key: t.id, style: { padding: '10px 14px', borderBottom: '1px solid #fee2e2', display: 'flex', alignItems: 'flex-start', gap: 10 } },
+            h('span', { style: { color: '#dc2626', fontSize: 15, marginTop: 1, flexShrink: 0 } }, '○'),
+            h('div', { style: { flex: 1 } },
+              h('div', { style: { fontSize: 13.5, color: '#1f2937', fontWeight: 500, lineHeight: 1.4 } }, t.title),
+              h('div', { style: { fontSize: 11, color: '#94a3b8', marginTop: 3, display: 'flex', gap: 6, flexWrap: 'wrap' } },
+                projName && h('span', null, `📁 ${projName}`),
+                h('span', { style: { color: '#dc2626', fontWeight: 500 } }, due?.text || t.dueDate)
+              )
+            )
+          );
+        })
+      ),
+      h('div', { style: S.modalActions },
+        h('button', { onClick: () => setOverdueModal(null), style: S.ghostBtn }, '知道了'),
+        h('button', {
+          onClick: () => {
+            setOverdueModal(null);
+            setShowAllTasks(true);
+            setShowTrash(false);
+            setActiveProject(null);
+            setAllTasksFilter('pending');
+            setMobileView('list');
+          },
+          style: S.primaryBtn
+        }, '查看所有任務 →')
+      )
+    )
+  );
+
   // 排序優先順序：釘選 > 拖曳自訂順序(sortOrder) > 預設排序
   const byOrder = (a, b) => {
     const pin = (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
@@ -2562,6 +2608,7 @@ function App() {
     );
     return h('div', { style: S.app },
       offlineBanner,
+      overdueModalEl,
       sidebar,
       resizeHandle,
       globalSearchModal,
@@ -2628,6 +2675,7 @@ function App() {
     const trashEmpty = deletedProjects.length === 0 && allDeletedNotes.length === 0 && allDeletedTasks.length === 0;
     return h('div', { style: S.app },
       offlineBanner,
+      overdueModalEl,
       sidebar,
       resizeHandle,
       globalSearchModal,
@@ -2686,6 +2734,7 @@ function App() {
 
   return h('div', { style: S.app },
     offlineBanner,
+    overdueModalEl,
     sidebar,
     resizeHandle,
 
