@@ -121,7 +121,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/10 18:06";
+const BUILD_TIME = "2026/07/13 09:26";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -398,7 +398,7 @@ function Login() {
   );
 }
 
-function TextModal({ title, subtitle, placeholder, initial, confirmText, onConfirm, onCancel, multiline }) {
+function TextModal({ title, subtitle, placeholder, initial, confirmText, onConfirm, onCancel, multiline, zIndex }) {
   const [val, setVal] = useState(initial || '');
   const [loading, setLoading] = useState(false);
   const [isComposing, setIsComposing] = useState(false);
@@ -413,7 +413,7 @@ function TextModal({ title, subtitle, placeholder, initial, confirmText, onConfi
     }
   };
 
-  return h('div', { style: S.modalOverlay, onClick: (e) => e.target === e.currentTarget && onCancel() },
+  return h('div', { style: { ...S.modalOverlay, ...(zIndex ? { zIndex } : {}) }, onClick: (e) => e.target === e.currentTarget && onCancel() },
     h('div', { style: S.modalCard },
       h('h3', { style: S.modalTitle }, title),
       subtitle && h('p', { style: S.modalSub }, subtitle),
@@ -1953,6 +1953,11 @@ function App() {
       });
     }
     scrollToBottomRef.current = true;
+    setOverdueModal(prev => {
+      if (!prev) return prev;
+      const next = prev.filter(x => x.id !== completeTaskId);
+      return next.length ? next : null;
+    });
     setCompleteTaskId(null);
   };
   const uncompleteTask = async (id) => {
@@ -2166,7 +2171,7 @@ function App() {
           const due = fmtDue(t.dueDate);
           const projName = projects.find(p => p.id === t.projectId)?.name || '';
           return h('div', { key: t.id, style: { padding: '10px 14px', borderBottom: '1px solid #fee2e2', display: 'flex', alignItems: 'flex-start', gap: 10 } },
-            h('span', { style: { color: '#dc2626', fontSize: 15, marginTop: 1, flexShrink: 0 } }, '○'),
+            h('div', { onClick: () => setCompleteTaskId(t.id), style: S.taskCheck }),
             h('div', { style: { flex: 1 } },
               h('div', { style: { fontSize: 13.5, color: '#1f2937', fontWeight: 500, lineHeight: 1.4 } }, t.title),
               h('div', { style: { fontSize: 11, color: '#94a3b8', marginTop: 3, display: 'flex', gap: 6, flexWrap: 'wrap' } },
@@ -2667,7 +2672,7 @@ function App() {
       completeTaskId && h(TextModal, {
         title: '完成任務', subtitle: '記錄一下完成的方式或結果，之後可以回顧。',
         placeholder: '例如：已親送至客戶辦公室、編號 A-23',
-        multiline: true, confirmText: '完成',
+        multiline: true, confirmText: '完成', zIndex: 700,
         onConfirm: completeTask, onCancel: () => setCompleteTaskId(null)
       }),
       h('main', { className: mobileView === 'list' ? 'mobile-full-width' : 'hide-on-mobile', style: { ...S.editorCol, overflow: 'hidden' }, ...swipeHandlers('alltasks') },
@@ -3395,7 +3400,7 @@ function App() {
     completeTaskId && h(TextModal, {
       title: '完成任務', subtitle: '記錄一下完成的方式或結果，之後可以回顧。',
       placeholder: '例如：已親送至客戶辦公室、編號 A-23',
-      multiline: true, confirmText: '完成',
+      multiline: true, confirmText: '完成', zIndex: 700,
       onConfirm: completeTask, onCancel: () => setCompleteTaskId(null)
     }),
     folderMenu && h('div', { style: S.modalOverlay, onClick: () => setFolderMenu(null) },
