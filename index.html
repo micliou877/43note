@@ -68,6 +68,8 @@
   .note-body .li1 { margin: 3px 0; }
   .note-body .li2 { padding-left: 2em; margin: 3px 0; }
   .note-body .li3 { padding-left: 4em; margin: 3px 0; }
+  .note-body .page-break { display: block; text-align: center; font-size: 11px; color: #94a3b8;
+    padding: 6px 0; margin: 10px 0; border-top: 1px dashed #cbd5e1; border-bottom: 1px dashed #cbd5e1; user-select: none; }
   .print-only-title { display: none; }
   @media print {
     aside, section, .resize-handle, .no-print { display: none !important; }
@@ -80,6 +82,8 @@
     .note-body { overflow: visible !important; min-height: 0 !important; max-height: none !important; border: none !important; border-radius: 0 !important; background: white !important; }
     .note-body img[data-inline]:hover, .note-body img[data-inline].img-sel { outline: none !important; }
     .note-body img[data-inline] { cursor: default !important; break-inside: avoid; }
+    .note-body .page-break { page-break-before: always; break-before: page; border: none !important;
+      padding: 0 !important; margin: 0 !important; height: 0 !important; font-size: 0 !important; color: transparent !important; overflow: hidden; }
     @page { margin: 18mm; size: A4; }
   }
 </style>
@@ -121,7 +125,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/13 10:55";
+const BUILD_TIME = "2026/07/13 16:58";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1781,6 +1785,10 @@ function App() {
     }
     document.execCommand('insertHTML', false, `<div class="${cls}">${prefix} </div>`);
   };
+  const insertPageBreak = () => {
+    const body = bodyRef.current; if (!body) return; body.focus();
+    document.execCommand('insertHTML', false, '<div class="page-break" contenteditable="false">✂ 分頁（列印/匯出PDF會從這裡換頁）</div><div><br></div>');
+  };
   const trashNote = async (id) => {
     await updateDoc(doc(db, `users/${user.uid}/notes/${id}`), { deleted: true, deletedAt: serverTimestamp() });
     if (activeNote?.id === id) { setActiveNote(null); setMobileView('list'); }
@@ -3192,7 +3200,10 @@ function App() {
                   h('button', { onMouseDown: (e) => { e.preventDefault(); applyListItem('li2', 'a.'); },
                     style: S.fmtBtn, title: '小項 a. b. c.' }, 'a.小'),
                   h('button', { onMouseDown: (e) => { e.preventDefault(); applyListItem('li3', '。'); },
-                    style: S.fmtBtn, title: '細項 。' }, '。細')
+                    style: S.fmtBtn, title: '細項 。' }, '。細'),
+                  h('div', { style: S.fmtDivider }),
+                  h('button', { onMouseDown: (e) => { e.preventDefault(); insertPageBreak(); },
+                    style: S.fmtBtn, title: '插入分頁點，列印/匯出PDF時會從這裡另起一頁' }, '✂ 分頁')
                 ),
                 h('div', { style: { display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 } },
                   h('button', { onClick: undoBodyEdit, disabled: !canBodyUndo, title: '上一步 (Ctrl+Z)',
