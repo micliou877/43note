@@ -121,7 +121,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/13 09:26";
+const BUILD_TIME = "2026/07/13 09:52";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -2624,7 +2624,8 @@ function App() {
       style: { ...S.taskItem, opacity: t.done ? 0.7 : 1, borderLeft: `3px solid ${palette.light}`, paddingLeft: 14 } },
       h('div', {
         onClick: () => { if (t.done) uncompleteTask(t.id); else setCompleteTaskId(t.id); },
-        style: { ...S.taskCheck, ...(t.done ? S.taskCheckDone : {}), borderColor: t.done ? palette.border : undefined }
+        title: t.done ? '取消完成' : '打勾完成任務',
+        style: { ...S.taskCheck, ...(t.done ? S.taskCheckDone : { borderColor: palette.border, borderWidth: 2 }) }
       }, t.done ? '✓' : ''),
       h('div', { style: { flex: 1 } },
         h('div', { style: { display: 'flex', alignItems: 'flex-start', gap: 6 } },
