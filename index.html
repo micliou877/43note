@@ -121,7 +121,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/13 09:52";
+const BUILD_TIME = "2026/07/13 10:55";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -2466,7 +2466,7 @@ function App() {
             !collapsed && fps.map(p =>
               h(ProjectItem, {
                 key: p.id, project: p, isActive: activeProject?.id === p.id, hasOverdue: overdueProjectIds.has(p.id),
-                onClick: () => { saveIfDirtyRef.current?.(); setSaveStatus('idle'); setActiveProject(p); setActiveNote(null); setSearch(""); setTab('notes'); setMobileView('list'); },
+                onClick: () => { saveIfDirtyRef.current?.(); setSaveStatus('idle'); setShowAllTasks(false); setShowTrash(false); setActiveProject(p); setActiveNote(null); setSearch(""); setTab('notes'); setMobileView('list'); },
                 onRename: (name) => renameProject(p.id, name),
                 onDelete: () => setConfirmDel({ type: "project", id: p.id }),
                 confirmingDelete: confirmDel?.type === "project" && confirmDel.id === p.id,
@@ -2489,7 +2489,7 @@ function App() {
         ...activeProjects.filter(p => !p.folderId).map(p =>
           h(ProjectItem, {
             key: p.id, project: p, isActive: activeProject?.id === p.id, hasOverdue: overdueProjectIds.has(p.id),
-            onClick: () => { saveIfDirtyRef.current?.(); setSaveStatus('idle'); setActiveProject(p); setActiveNote(null); setSearch(""); setTab('notes'); setMobileView('list'); },
+            onClick: () => { saveIfDirtyRef.current?.(); setSaveStatus('idle'); setShowAllTasks(false); setShowTrash(false); setActiveProject(p); setActiveNote(null); setSearch(""); setTab('notes'); setMobileView('list'); },
             onRename: (name) => renameProject(p.id, name),
             onDelete: () => setConfirmDel({ type: "project", id: p.id }),
             confirmingDelete: confirmDel?.type === "project" && confirmDel.id === p.id,
