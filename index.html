@@ -126,7 +126,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/15 14:06";
+const BUILD_TIME = "2026/07/15 14:18";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1792,6 +1792,32 @@ function App() {
     const body = bodyRef.current; if (!body) return; body.focus();
     document.execCommand('insertHTML', false, '<div class="page-break" contenteditable="false">✂ 分頁（列印/匯出PDF會從這裡換頁）</div><div><br></div>');
   };
+  const applyHighlight = (color) => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) { bodyRef.current?.focus(); return; }
+    const range = sel.getRangeAt(0);
+    if (!bodyRef.current?.contains(range.commonAncestorContainer)) { bodyRef.current?.focus(); return; }
+    const now = Date.now();
+    if (now - bodyUndoLastPush.current > 800) {
+      bodyUndoStack.current = [...bodyUndoStack.current, activeNote.body || ''].slice(-50);
+      bodyUndoLastPush.current = now;
+      setCanBodyUndo(true);
+    }
+    // extractContents + span：直接包住選取內容為行內 <span>，
+    // 完全避開 execCommand('hiliteColor') 把背景色套到整個 block 的瀏覽器 bug
+    const frag = range.extractContents();
+    const span = document.createElement('span');
+    span.style.backgroundColor = color;
+    span.appendChild(frag);
+    range.insertNode(span);
+    const r = document.createRange();
+    r.setStartAfter(span);
+    r.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(r);
+    updateNoteFields({ body: bodyRef.current?.innerHTML || '' });
+    bodyRef.current?.focus();
+  };
   const trashNote = async (id) => {
     await updateDoc(doc(db, `users/${user.uid}/notes/${id}`), { deleted: true, deletedAt: serverTimestamp() });
     if (activeNote?.id === id) { setActiveNote(null); setMobileView('list'); }
@@ -3123,40 +3149,20 @@ function App() {
                   h('button', { onMouseDown: (e) => { e.preventDefault(); const n = Math.min(48, inlineFontSize + 2); setInlineFontSize(n); applyInlineFontSize(n); }, style: { ...S.fmtBtn, fontWeight: 600 }, title: '放大選取文字' }, 'A+'),
                   h('div', { style: S.fmtDivider }),
                   h('span', { style: { fontSize: 11, color: '#94a3b8', userSelect: 'none' } }, '顏色'),
-                  ...['#111827','#dc2626','#d97706','#059669','#2563eb','#7c3aed','#db2777'].map(c =>
+                  ...['#111827','#6b7280','#dc2626','#d97706','#059669','#2563eb','#7c3aed','#db2777'].map(c =>
                     h('button', { key: c,
                       onMouseDown: (e) => { e.preventDefault(); document.execCommand('foreColor', false, c); setFontColor(c); bodyRef.current?.focus(); },
                       title: '文字顏色',
                       style: { width: 16, height: 16, borderRadius: '50%', background: c, border: fontColor === c ? '2px solid #0d9488' : '1px solid rgba(0,0,0,0.12)', cursor: 'pointer', padding: 0, flexShrink: 0 } })
                   ),
-                  h('button', { onMouseDown: (e) => {
-                    e.preventDefault();
-                    const sel = window.getSelection();
-                    if (!sel || sel.isCollapsed || sel.rangeCount === 0) { bodyRef.current?.focus(); return; }
-                    const range = sel.getRangeAt(0);
-                    if (!bodyRef.current?.contains(range.commonAncestorContainer)) { bodyRef.current?.focus(); return; }
-                    const now = Date.now();
-                    if (now - bodyUndoLastPush.current > 800) {
-                      bodyUndoStack.current = [...bodyUndoStack.current, activeNote.body || ''].slice(-50);
-                      bodyUndoLastPush.current = now;
-                      setCanBodyUndo(true);
-                    }
-                    // extractContents + span：直接包住選取內容為行內 <span>，
-                    // 完全避開 execCommand('hiliteColor') 把背景色套到整個 block 的瀏覽器 bug
-                    const frag = range.extractContents();
-                    const span = document.createElement('span');
-                    span.style.backgroundColor = '#fef08a';
-                    span.appendChild(frag);
-                    range.insertNode(span);
-                    const r = document.createRange();
-                    r.setStartAfter(span);
-                    r.collapse(true);
-                    sel.removeAllRanges();
-                    sel.addRange(r);
-                    updateNoteFields({ body: bodyRef.current?.innerHTML || '' });
-                    bodyRef.current?.focus();
-                  },
-                    style: { ...S.fmtBtn, fontSize: 11, background: '#fef08a', border: '1px solid #fde68a' }, title: '螢光標記' }, '螢光'),
+                  h('div', { style: S.fmtDivider }),
+                  h('span', { style: { fontSize: 11, color: '#94a3b8', userSelect: 'none' } }, '螢光'),
+                  ...[['#fef08a','黃'],['#bbf7d0','綠'],['#bfdbfe','藍'],['#fbcfe8','粉'],['#fed7aa','橘']].map(([c, label]) =>
+                    h('button', { key: c,
+                      onMouseDown: (e) => { e.preventDefault(); applyHighlight(c); },
+                      title: `螢光標記（${label}）`,
+                      style: { width: 16, height: 16, borderRadius: 4, background: c, border: '1px solid rgba(0,0,0,0.15)', cursor: 'pointer', padding: 0, flexShrink: 0 } })
+                  ),
                   h('div', { style: S.fmtDivider }),
                   h('button', { onMouseDown: (e) => { e.preventDefault(); document.execCommand('indent'); bodyRef.current?.focus(); },
                     style: S.fmtBtn, title: 'TAB 縮排' }, '⇥ 縮'),
