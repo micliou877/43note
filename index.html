@@ -69,7 +69,8 @@
   .note-body .li2 { padding-left: 2em; margin: 3px 0; }
   .note-body .li3 { padding-left: 4em; margin: 3px 0; }
   .note-body .page-break { display: block; text-align: center; font-size: 11px; color: #94a3b8;
-    padding: 6px 0; margin: 10px 0; border-top: 1px dashed #cbd5e1; border-bottom: 1px dashed #cbd5e1; user-select: none; }
+    padding: 6px 0; margin: 10px 0; border-top: 1px dashed #cbd5e1; border-bottom: 1px dashed #cbd5e1; user-select: none; cursor: pointer; }
+  .note-body .page-break.break-sel { background: #fee2e2; border-color: #ef4444; color: #ef4444; }
   .print-only-title { display: none; }
   @media print {
     aside, section, .resize-handle, .no-print { display: none !important; }
@@ -125,7 +126,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/15 13:52";
+const BUILD_TIME = "2026/07/15 14:06";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1290,6 +1291,7 @@ function App() {
   const bodyUndoStack      = useRef([]);
   const bodyUndoLastPush   = useRef(0);
   const bodyRef            = useRef(null);
+  const selBreakRef        = useRef(null);
   const overdueAlertShownRef = useRef(false);
   const [canBodyUndo, setCanBodyUndo] = useState(false);
   const [fontColor, setFontColor] = useState('#111827');
@@ -1320,6 +1322,7 @@ function App() {
     bodyUndoStack.current = [];
     bodyUndoLastPush.current = 0;
     setCanBodyUndo(false);
+    selBreakRef.current = null;
     if (bodyRef.current) bodyRef.current.innerHTML = toBodyHtml(activeNote?.body || '');
   }, [activeNote?.id]);
 
@@ -3222,6 +3225,10 @@ function App() {
                   const img = e.target.tagName === 'IMG' && e.target.dataset.inline ? e.target : null;
                   if (img) selectInlineImg(img);
                   else clearSelImg();
+                  const brk = e.target.closest?.('.page-break');
+                  if (selBreakRef.current && selBreakRef.current !== brk) selBreakRef.current.classList.remove('break-sel');
+                  if (brk) { brk.classList.add('break-sel'); selBreakRef.current = brk; }
+                  else selBreakRef.current = null;
                 },
                 onInput: () => {
                   const html = bodyRef.current?.innerHTML || '';
@@ -3274,6 +3281,13 @@ function App() {
                   if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undoBodyEdit(); return; }
                   if (e.key === 'Backspace' || e.key === 'Delete') {
                     const body = bodyRef.current;
+                    if (body && selBreakRef.current && body.contains(selBreakRef.current)) {
+                      e.preventDefault();
+                      selBreakRef.current.remove();
+                      selBreakRef.current = null;
+                      updateNoteFields({ body: body.innerHTML });
+                      return;
+                    }
                     const sel0 = window.getSelection();
                     if (body && sel0.rangeCount) {
                       const range = sel0.getRangeAt(0);
@@ -3288,9 +3302,10 @@ function App() {
                         const { startContainer: c, startOffset: o } = range;
                         if (e.key === 'Backspace') {
                           if (c.nodeType === 1 && o > 0) target = c.childNodes[o - 1];
+                          else if (c.nodeType === 1 && o === 0) target = c.previousSibling || (c.parentNode !== body ? c.parentNode.previousSibling : null);
                           else if (c.nodeType === 3 && o === 0) target = c.previousSibling || (c.parentNode !== body ? c.parentNode.previousSibling : null);
                         } else {
-                          if (c.nodeType === 1) target = c.childNodes[o];
+                          if (c.nodeType === 1) target = c.childNodes[o] || c.nextSibling;
                           else if (c.nodeType === 3 && o === c.textContent.length) target = c.nextSibling || (c.parentNode !== body ? c.parentNode.nextSibling : null);
                         }
                       }
