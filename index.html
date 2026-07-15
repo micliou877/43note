@@ -125,7 +125,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/13 16:58";
+const BUILD_TIME = "2026/07/15 13:52";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -3272,6 +3272,36 @@ function App() {
                 },
                 onKeyDown: (e) => {
                   if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undoBodyEdit(); return; }
+                  if (e.key === 'Backspace' || e.key === 'Delete') {
+                    const body = bodyRef.current;
+                    const sel0 = window.getSelection();
+                    if (body && sel0.rangeCount) {
+                      const range = sel0.getRangeAt(0);
+                      const isPageBreak = (n) => n && n.nodeType === 1 && n.classList?.contains('page-break');
+                      let target = null;
+                      if (!range.collapsed) {
+                        if (range.startContainer === range.endContainer && range.startContainer.nodeType === 1 &&
+                            range.endOffset - range.startOffset === 1) {
+                          target = range.startContainer.childNodes[range.startOffset];
+                        }
+                      } else {
+                        const { startContainer: c, startOffset: o } = range;
+                        if (e.key === 'Backspace') {
+                          if (c.nodeType === 1 && o > 0) target = c.childNodes[o - 1];
+                          else if (c.nodeType === 3 && o === 0) target = c.previousSibling || (c.parentNode !== body ? c.parentNode.previousSibling : null);
+                        } else {
+                          if (c.nodeType === 1) target = c.childNodes[o];
+                          else if (c.nodeType === 3 && o === c.textContent.length) target = c.nextSibling || (c.parentNode !== body ? c.parentNode.nextSibling : null);
+                        }
+                      }
+                      if (isPageBreak(target)) {
+                        e.preventDefault();
+                        target.remove();
+                        updateNoteFields({ body: body.innerHTML });
+                        return;
+                      }
+                    }
+                  }
                   if (e.key !== 'Tab' && e.key !== 'Enter') return;
                   const sel = window.getSelection();
                   let listNode = null;
