@@ -126,7 +126,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/16 10:06";
+const BUILD_TIME = "2026/07/16 10:15";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1809,6 +1809,15 @@ function App() {
     const wrapRange = (r) => {
       if (r.collapsed) return null;
       const frag = r.extractContents();
+      // 選取範圍內若已有舊的螢光色（例如先前上過紅色），先清掉舊的
+      // background-color，否則巢狀在裡面的舊 <span> 仍會蓋掉外層新顏色，
+      // 導致「改色」看起來像沒反應，只有先清除格式才能換色。
+      frag.querySelectorAll('[style]').forEach(el => {
+        if (el.style.backgroundColor) {
+          el.style.removeProperty('background-color');
+          if (!el.style.cssText.trim()) el.removeAttribute('style');
+        }
+      });
       const span = document.createElement('span');
       span.style.backgroundColor = color;
       span.appendChild(frag);
