@@ -126,7 +126,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/16 10:15";
+const BUILD_TIME = "2026/07/16 10:43";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1276,6 +1276,7 @@ function App() {
   // 👇 這是控制手機版顯示哪一個欄位的狀態
   const [mobileView, setMobileView] = useState('sidebar'); // 'sidebar' | 'list' | 'editor'
   const [sidebarWidth, setSidebarWidth] = useState(() => parseInt(localStorage.getItem('sidebarW') || '230'));
+  const [focusMode, setFocusMode] = useState(false); // 寫筆記時可切換全螢幕，隱藏左側專案/筆記列表
 
   const lastLocalEdit = useRef(0);
   const dragId        = useRef(null);
@@ -1318,6 +1319,7 @@ function App() {
   }, []);
 
   useEffect(() => { activeNoteRef.current = activeNote; }, [activeNote]);
+  useEffect(() => { if (!activeNote) setFocusMode(false); }, [activeNote]);
   useEffect(() => {
     bodyUndoStack.current = [];
     bodyUndoLastPush.current = 0;
@@ -2888,11 +2890,11 @@ function App() {
   return h('div', { style: S.app },
     offlineBanner,
     overdueModalEl,
-    sidebar,
-    resizeHandle,
+    !focusMode && sidebar,
+    !focusMode && resizeHandle,
 
     // 渲染清單 (List Column)
-    activeProject && h('section', { className: mobileView === 'list' ? 'mobile-full-width' : 'hide-on-mobile', style: S.listCol, ...swipeHandlers('list') },
+    !focusMode && activeProject && h('section', { className: mobileView === 'list' ? 'mobile-full-width' : 'hide-on-mobile', style: S.listCol, ...swipeHandlers('list') },
       h('div', { style: S.listHead },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
           h('button', { className: 'mobile-only', onClick: () => setMobileView('sidebar'), style: { background: 'none', border: 'none', fontSize: 24, padding: '0 4px', cursor: 'pointer', color: '#64748b' } }, '‹'),
@@ -3268,7 +3270,9 @@ function App() {
                   h('button', { onClick: undoBodyEdit, disabled: !canBodyUndo, title: '上一步 (Ctrl+Z)',
                     style: { ...S.fmtBtn, minWidth: 'auto', padding: '0 8px', opacity: canBodyUndo ? 1 : 0.35, cursor: canBodyUndo ? 'pointer' : 'default' } }, '↩ 上一步'),
                   h('button', { onClick: () => setBodyExpanded(b => !b), title: bodyExpanded ? '縮小' : '放大文字欄',
-                    style: { ...S.fmtBtn, color: '#94a3b8', fontSize: 16 } }, bodyExpanded ? '⊡' : '⊞')
+                    style: { ...S.fmtBtn, color: '#94a3b8', fontSize: 16 } }, bodyExpanded ? '⊡' : '⊞'),
+                  h('button', { className: 'hide-on-mobile', onClick: () => setFocusMode(f => !f), title: focusMode ? '離開全螢幕（顯示左側列表）' : '全螢幕寫筆記（隱藏左側列表）',
+                    style: { ...S.fmtBtn, color: focusMode ? '#0d9488' : '#94a3b8', fontSize: 15 } }, focusMode ? '⤢ 離開全螢幕' : '⛶ 全螢幕')
                 )
               ),
               h('div', {
