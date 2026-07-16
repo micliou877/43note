@@ -126,7 +126,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/15 14:18";
+const BUILD_TIME = "2026/07/16 10:06";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1795,8 +1795,9 @@ function App() {
   const applyHighlight = (color) => {
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) { bodyRef.current?.focus(); return; }
+    const body = bodyRef.current;
     const range = sel.getRangeAt(0);
-    if (!bodyRef.current?.contains(range.commonAncestorContainer)) { bodyRef.current?.focus(); return; }
+    if (!body?.contains(range.commonAncestorContainer)) { body?.focus(); return; }
     const now = Date.now();
     if (now - bodyUndoLastPush.current > 800) {
       bodyUndoStack.current = [...bodyUndoStack.current, activeNote.body || ''].slice(-50);
@@ -1805,18 +1806,58 @@ function App() {
     }
     // extractContents + span：直接包住選取內容為行內 <span>，
     // 完全避開 execCommand('hiliteColor') 把背景色套到整個 block 的瀏覽器 bug
-    const frag = range.extractContents();
-    const span = document.createElement('span');
-    span.style.backgroundColor = color;
-    span.appendChild(frag);
-    range.insertNode(span);
-    const r = document.createRange();
-    r.setStartAfter(span);
-    r.collapse(true);
+    const wrapRange = (r) => {
+      if (r.collapsed) return null;
+      const frag = r.extractContents();
+      const span = document.createElement('span');
+      span.style.backgroundColor = color;
+      span.appendChild(frag);
+      r.insertNode(span);
+      return span;
+    };
+    // 每一行在 note-body 底下都是獨立的 <div>（Chrome contenteditable 換行機制），
+    // 選取範圍若跨越多行，不能把整段（含多個 block <div>）塞進單一 inline <span>，
+    // 否則會產生 <span><div>…</div><div>…</div></span> 這種不合法巢狀，導致螢光筆失效。
+    // 因此跨行時改成逐行各自包一個 <span>。
+    const lineOf = (node) => {
+      let n = node.nodeType === Node.TEXT_NODE ? node.parentNode : node;
+      while (n && n !== body) {
+        if (n.parentNode === body) return n;
+        n = n.parentNode;
+      }
+      return null;
+    };
+    const startLine = lineOf(range.startContainer);
+    const endLine = lineOf(range.endContainer);
+    let lastSpan = null;
+    if (!startLine || !endLine || startLine === endLine) {
+      lastSpan = wrapRange(range);
+    } else {
+      const lines = [];
+      let n = startLine, guard = 0;
+      while (n && guard++ < 2000) { lines.push(n); if (n === endLine) break; n = n.nextSibling; }
+      if (lines[lines.length - 1] !== endLine) {
+        // 找不到 startLine -> endLine 的兄弟節點路徑（例如跨越清單），退回原本單一 span 包法
+        lastSpan = wrapRange(range);
+      } else {
+        lines.forEach((lineEl, i) => {
+          const r = document.createRange();
+          if (i === 0 && i === lines.length - 1) { r.setStart(range.startContainer, range.startOffset); r.setEnd(range.endContainer, range.endOffset); }
+          else if (i === 0) { r.setStart(range.startContainer, range.startOffset); r.setEnd(lineEl, lineEl.childNodes.length); }
+          else if (i === lines.length - 1) { r.setStart(lineEl, 0); r.setEnd(range.endContainer, range.endOffset); }
+          else { r.selectNodeContents(lineEl); }
+          const span = wrapRange(r);
+          if (span) lastSpan = span;
+        });
+      }
+    }
+    const r2 = document.createRange();
+    if (lastSpan) { r2.setStartAfter(lastSpan); r2.collapse(true); }
+    else { r2.selectNodeContents(body); r2.collapse(false); }
     sel.removeAllRanges();
-    sel.addRange(r);
-    updateNoteFields({ body: bodyRef.current?.innerHTML || '' });
-    bodyRef.current?.focus();
+    sel.addRange(r2);
+    updateNoteFields({ body: body?.innerHTML || '' });
+    body?.focus();
   };
   const trashNote = async (id) => {
     await updateDoc(doc(db, `users/${user.uid}/notes/${id}`), { deleted: true, deletedAt: serverTimestamp() });
