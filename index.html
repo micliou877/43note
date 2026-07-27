@@ -112,7 +112,7 @@ import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore, collection, query, orderBy, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, serverTimestamp, writeBatch, getDocs, deleteField, limit } from "firebase/firestore";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore, collection, query, orderBy, where, onSnapshot, addDoc, deleteDoc, doc, getDoc, updateDoc, serverTimestamp, writeBatch, getDocs, deleteField, limit } from "firebase/firestore";
 import { Document, Paragraph, TextRun, ImageRun, HeadingLevel, Packer } from "docx";
 
 // ════════════════════════════════════════════════════════════════
@@ -126,7 +126,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/16 10:43";
+const BUILD_TIME = "2026/07/27 14:19";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -440,14 +440,17 @@ function TextModal({ title, subtitle, placeholder, initial, confirmText, onConfi
   );
 }
 
-function NewTaskModal({ onConfirm, onCancel }) {
+function NewTaskModal({ onConfirm, onCancel, notes }) {
   const [title, setTitle] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [reminderOffset, setReminderOffset] = useState('');
   const [recur, setRecur] = useState('');
   const [recurInterval, setRecurInterval] = useState('7');
+  const [noteIds, setNoteIds] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isComposing, setIsComposing] = useState(false);
+
+  const toggleNote = (id) => setNoteIds(cur => cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id]);
 
   const submit = async () => {
     if (!title.trim() || loading) return;
@@ -458,6 +461,7 @@ function NewTaskModal({ onConfirm, onCancel }) {
         reminderOffset: reminderOffset !== '' ? parseInt(reminderOffset) : null,
         recur: dueDate && recur ? recur : null,
         recurInterval: dueDate && recur === 'custom' ? (parseInt(recurInterval) || 7) : null,
+        noteIds,
       });
     } catch { setLoading(false); }
   };
@@ -502,9 +506,52 @@ function NewTaskModal({ onConfirm, onCancel }) {
           h('span', { style: { fontSize: 13, color: '#374151' } }, '天重複一次')
         )
       ),
+      notes && notes.length > 0 && h('div', { style: { marginBottom: 16 } },
+        h('label', { style: { fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 } }, `🔗 標記相關筆記（選填${noteIds.length ? `，已選 ${noteIds.length} 則` : ''}）`),
+        h('div', { style: { maxHeight: 140, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 10, padding: 6 } },
+          ...notes.map(n => h('label', { key: n.id,
+            style: { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 13, color: '#374151' } },
+            h('input', { type: 'checkbox', checked: noteIds.includes(n.id), onChange: () => toggleNote(n.id) }),
+            h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, n.title || '未命名筆記')
+          ))
+        )
+      ),
       h('div', { style: S.modalActions },
         h('button', { onClick: onCancel, disabled: loading, style: S.ghostBtn }, '取消'),
         h('button', { onClick: submit, disabled: !title.trim() || loading, style: { ...S.primaryBtn, opacity: title.trim() ? 1 : 0.5 } }, loading ? '處理中…' : '建立')
+      )
+    )
+  );
+}
+
+function NoteLinkModal({ notes, selectedIds, onSave, onCancel }) {
+  const [noteIds, setNoteIds] = useState(selectedIds || []);
+  const [loading, setLoading] = useState(false);
+
+  const toggleNote = (id) => setNoteIds(cur => cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id]);
+
+  const submit = async () => {
+    if (loading) return;
+    setLoading(true);
+    try { await onSave(noteIds); } catch { setLoading(false); }
+  };
+
+  return h('div', { style: S.modalOverlay, onClick: e => e.target === e.currentTarget && onCancel() },
+    h('div', { style: S.modalCard },
+      h('h3', { style: S.modalTitle }, '🔗 標記相關筆記'),
+      h('p', { style: S.modalSub }, '勾選與這個任務相關的筆記，之後可以直接點過去查看。'),
+      notes && notes.length > 0
+        ? h('div', { style: { maxHeight: 260, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 10, padding: 6, marginBottom: 16 } },
+            ...notes.map(n => h('label', { key: n.id,
+              style: { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 13, color: '#374151' } },
+              h('input', { type: 'checkbox', checked: noteIds.includes(n.id), onChange: () => toggleNote(n.id) }),
+              h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, n.title || '未命名筆記')
+            ))
+          )
+        : h('p', { style: { ...S.modalSub, marginBottom: 16 } }, '這個專案目前還沒有筆記可以標記。'),
+      h('div', { style: S.modalActions },
+        h('button', { onClick: onCancel, disabled: loading, style: S.ghostBtn }, '取消'),
+        h('button', { onClick: submit, disabled: loading, style: S.primaryBtn }, loading ? '處理中…' : '儲存')
       )
     )
   );
@@ -1253,6 +1300,8 @@ function App() {
   const [newTaskModal, setNewTaskModal] = useState(false);
   const [completeTaskId, setCompleteTaskId] = useState(null);
   const [editingTask, setEditingTask] = useState(null); // { id, title }
+  const [linkNotesTask, setLinkNotesTask] = useState(null); // task being tagged with related notes
+  const [noteTitleCache, setNoteTitleCache] = useState({}); // noteId -> { title, projectId } (for cross-project "所有任務" view)
   const [noteSort, setNoteSort] = useState('updated');  // 'updated' | 'created' | 'name'
   const [taskSort, setTaskSort] = useState('created');  // 'created' | 'name' | 'done'
   const [permDelConfirm, setPermDelConfirm] = useState(null);
@@ -1484,6 +1533,30 @@ function App() {
     return onSnapshot(query(collection(db, `users/${user.uid}/tasks`), where('deleted', '==', false)),
       snap => setAllTasksFull(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
   }, [user, showAllTasks]);
+
+  // 「所有任務」是跨專案畫面，任務標記的筆記可能不在目前載入的 notes 裡，需要另外查詢標題
+  useEffect(() => {
+    if (!user || !showAllTasks) return;
+    const missing = new Set();
+    allTasksFull.forEach(t => (t.noteIds || []).forEach(id => { if (!noteTitleCache[id]) missing.add(id); }));
+    if (missing.size === 0) return;
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all([...missing].map(async id => {
+        try {
+          const snap = await getDoc(doc(db, `users/${user.uid}/notes/${id}`));
+          return [id, snap.exists() ? { title: snap.data().title || '未命名筆記', projectId: snap.data().projectId } : null];
+        } catch { return [id, null]; }
+      }));
+      if (cancelled) return;
+      setNoteTitleCache(prev => {
+        const next = { ...prev };
+        entries.forEach(([id, val]) => { next[id] = val || { title: '（筆記已刪除）', projectId: null }; });
+        return next;
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [user, showAllTasks, allTasksFull]);
 
   // Projects
   const createProject = async (name) => {
@@ -2002,11 +2075,12 @@ function App() {
     const reminderOffset = typeof input === 'object' && input.reminderOffset != null ? input.reminderOffset : null;
     const recur = typeof input === 'object' ? (input.recur || null) : null;
     const recurInterval = typeof input === 'object' ? (input.recurInterval || null) : null;
+    const noteIds = typeof input === 'object' && Array.isArray(input.noteIds) ? input.noteIds : [];
     try {
       const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("連線逾時")), 5000));
       const addPromise = addDoc(collection(db, `users/${user.uid}/tasks`), {
         projectId: activeProject.id, title, done: false, deleted: false, images: [], pinned: false, sortOrder: Date.now(),
-        created: serverTimestamp(), dueDate, reminderOffset, reminded: false, recur, recurInterval,
+        created: serverTimestamp(), dueDate, reminderOffset, reminded: false, recur, recurInterval, noteIds,
       });
       await Promise.race([addPromise, timeout]);
       scrollToBottomRef.current = true;
@@ -2089,6 +2163,22 @@ function App() {
     if (!title.trim()) { setEditingTask(null); return; }
     await updateDoc(doc(db, `users/${user.uid}/tasks/${id}`), { title: title.trim() });
     setEditingTask(null);
+  };
+  const updateTaskNoteLinks = async (id, noteIds) => {
+    await updateDoc(doc(db, `users/${user.uid}/tasks/${id}`), { noteIds });
+    setLinkNotesTask(null);
+  };
+  const openLinkedNote = (noteId, projectId) => {
+    const local = activeProject?.id === projectId ? notes.find(n => n.id === noteId) : null;
+    saveIfDirtyRef.current?.();
+    setSaveStatus('idle');
+    setShowAllTasks(false);
+    setShowTrash(false);
+    const project = projects.find(p => p.id === projectId);
+    if (project) setActiveProject(project);
+    setTab('notes');
+    setActiveNote(local || { id: noteId, projectId });
+    setMobileView('editor');
   };
   const trashTask = async (id) => {
     await updateDoc(doc(db, `users/${user.uid}/tasks/${id}`), { deleted: true, deletedAt: serverTimestamp() });
@@ -2736,6 +2826,15 @@ function App() {
               onClick: () => setSetDueDateTask(t),
               style: { display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, color: due.color, background: due.bg, padding: '1px 7px', borderRadius: 10, marginTop: 4, cursor: 'pointer', border: `1px solid ${due.bg}` }
             }, `📅 ${due.text}`, t.recur && h('span', { style: { marginLeft: 3, color: '#0d9488', fontWeight: 600 } }, `🔁${RECUR_LABEL[t.recur] || ''}`)); })(),
+            t.noteIds?.length > 0 && h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 } },
+              ...t.noteIds.map(nid => {
+                const meta = noteTitleCache[nid];
+                if (!meta) return null;
+                return h('span', { key: nid, onClick: (e) => { e.stopPropagation(); openLinkedNote(nid, meta.projectId || t.projectId); },
+                  style: { display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#2563eb', background: '#eff6ff', padding: '1px 7px', borderRadius: 10, cursor: 'pointer', border: '1px solid #dbeafe' } },
+                  `📝 ${meta.title}`);
+              })
+            ),
             h('div', { style: S.taskMeta }, t.done ? `完成於 ${fmt(t.doneAt)}` : `建立於 ${fmt(t.created)}`)
           ),
           h('button', { onClick: e => { e.stopPropagation(); setSetDueDateTask(t); }, title: '設截止日期 / 提醒',
@@ -3049,6 +3148,15 @@ function App() {
                       onClick: () => setSetDueDateTask(t),
                       style: { display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, color: due.color, background: due.bg, padding: '1px 7px', borderRadius: 10, marginTop: 4, cursor: 'pointer', border: `1px solid ${due.bg}` }
                     }, `📅 ${due.text}`, t.recur && h('span', { style: { marginLeft: 3, color: '#0d9488', fontWeight: 600 } }, `🔁${RECUR_LABEL[t.recur] || ''}`)); })(),
+                    t.noteIds?.length > 0 && h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 } },
+                      ...t.noteIds.map(nid => {
+                        const n = notes.find(x => x.id === nid);
+                        if (!n) return null;
+                        return h('span', { key: nid, onClick: (e) => { e.stopPropagation(); openLinkedNote(nid, t.projectId); },
+                          style: { display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#2563eb', background: '#eff6ff', padding: '1px 7px', borderRadius: 10, cursor: 'pointer', border: '1px solid #dbeafe' } },
+                          `📝 ${n.title || '未命名筆記'}`);
+                      })
+                    ),
                     h('div', { style: S.taskMeta }, t.done ? `完成於 ${fmt(t.doneAt)}` : `建立於 ${fmt(t.created)}`)
                   ),
                   h('span', { onClick: () => toggleTaskPin(t.id, t.pinned),
@@ -3056,6 +3164,8 @@ function App() {
                     style: { cursor: 'pointer', fontSize: 11, opacity: t.pinned ? 1 : 0.2, color: '#0d9488', flexShrink: 0 } }, '📌'),
                   h('button', { onClick: e => { e.stopPropagation(); setSetDueDateTask(t); }, title: '設截止日期 / 提醒',
                     style: { ...S.imgActBtn, margin: 0, flexShrink: 0, fontSize: 13, padding: '5px 7px' } }, '📅'),
+                  h('button', { onClick: e => { e.stopPropagation(); setLinkNotesTask(t); }, title: '標記相關筆記',
+                    style: { ...S.imgActBtn, margin: 0, flexShrink: 0, fontSize: 13, padding: '5px 7px', color: t.noteIds?.length ? '#2563eb' : undefined } }, '🔗'),
                   h('label', { style: { ...S.imgActBtn, cursor: 'pointer', flexShrink: 0, margin: 0 }, title: '加照片' },
                     '📷',
                     h('input', { type: 'file', accept: 'image/*', multiple: true, onChange: (e) => onPickTaskImage(t.id, e), style: { display: 'none' } })
@@ -3508,7 +3618,13 @@ function App() {
       }) : null;
     })(),
     lightbox && h(Lightbox, { image: lightbox, onClose: () => setLightbox(null) }),
-    newTaskModal && h(NewTaskModal, { onConfirm: addTask, onCancel: () => setNewTaskModal(false) }),
+    newTaskModal && h(NewTaskModal, { onConfirm: addTask, onCancel: () => setNewTaskModal(false), notes: visibleNotes }),
+    linkNotesTask && h(NoteLinkModal, {
+      notes: visibleNotes,
+      selectedIds: linkNotesTask.noteIds || [],
+      onSave: (ids) => updateTaskNoteLinks(linkNotesTask.id, ids),
+      onCancel: () => setLinkNotesTask(null)
+    }),
     setDueDateTask && h(DueDateModal, {
       task: setDueDateTask,
       onSave: (dueDate, reminderOffset, recur, recurInterval) => updateTaskDueDate(setDueDateTask.id, dueDate, reminderOffset, recur, recurInterval),
