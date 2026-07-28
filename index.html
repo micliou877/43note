@@ -63,8 +63,9 @@
   .note-body img[data-inline] { max-width: 100%; border-radius: 6px; cursor: pointer; display: block; margin: 6px 0; }
   .note-body img[data-inline]:hover { outline: 2px solid #0d9488; }
   .note-body img[data-inline].img-sel { outline: 2px solid #0d9488; }
-  .note-body { overflow: hidden; }
+  .note-body { overflow: hidden; position: relative; }
   .note-body img[data-inline].img-row { float: left !important; margin: 3px 1% 8px 0 !important; }
+  .note-body img[data-inline].img-free { position: absolute; float: none !important; margin: 0 !important; cursor: move; z-index: 5; }
   .note-body .li1 { margin: 3px 0; }
   .note-body .li2 { padding-left: 2em; margin: 3px 0; }
   .note-body .li3 { padding-left: 4em; margin: 3px 0; }
@@ -126,7 +127,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/28 12:52";
+const BUILD_TIME = "2026/07/28 15:21";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -2006,6 +2007,30 @@ function App() {
     const img = bodyRef.current?.querySelector(`img[data-inline="${imgId}"]`);
     if (img) { img.remove(); updateNoteFields({ body: bodyRef.current.innerHTML }); }
   };
+  // 自由擺放模式的圖片（.img-free）用滑鼠拖曳直接改 left/top，不影響文字排列
+  const startFreeImgDrag = (e) => {
+    const img = e.target.tagName === 'IMG' && e.target.dataset.inline ? e.target : null;
+    if (!img || !img.classList.contains('img-free')) return;
+    e.preventDefault();
+    selectInlineImg(img);
+    const startLeft = parseFloat(img.style.left) || 0;
+    const startTop = parseFloat(img.style.top) || 0;
+    const startX = e.clientX, startY = e.clientY;
+    let moved = false;
+    const onMove = (ev) => {
+      moved = true;
+      img.style.left = Math.max(0, startLeft + (ev.clientX - startX)) + 'px';
+      img.style.top = Math.max(0, startTop + (ev.clientY - startY)) + 'px';
+      setSelImg(s => (s && s.imgId === img.dataset.inline) ? { ...s, rect: img.getBoundingClientRect() } : s);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      if (moved) updateNoteFields({ body: bodyRef.current.innerHTML });
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
   const startImgResize = (e) => {
     e.preventDefault(); e.stopPropagation();
     const img = bodyRef.current?.querySelector(`img[data-inline="${selImg?.imgId}"]`);
@@ -3401,6 +3426,7 @@ function App() {
                 suppressContentEditableWarning: true,
                 'data-placeholder': '在這裡寫工作記事…　拍照或匯入照片後，點照片即可在上面畫圖、標註。',
                 className: 'note-body',
+                onMouseDown: startFreeImgDrag,
                 onClick: (e) => {
                   const img = e.target.tagName === 'IMG' && e.target.dataset.inline ? e.target : null;
                   if (img) selectInlineImg(img);
@@ -3583,6 +3609,30 @@ function App() {
         setSelImg(s => s ? { ...s, rect: img.getBoundingClientRect() } : s);
       };
       const isRow = !!bodyRef.current?.querySelector(`img[data-inline="${selImg.imgId}"]`)?.classList.contains('img-row');
+      const toggleFree = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const img = bodyRef.current?.querySelector(`img[data-inline="${selImg.imgId}"]`);
+        const body = bodyRef.current;
+        if (!img || !body) return;
+        if (img.classList.contains('img-free')) {
+          img.classList.remove('img-free');
+          img.style.position = ''; img.style.left = ''; img.style.top = '';
+          img.draggable = true;
+        } else {
+          img.classList.remove('img-row');
+          img.style.float = '';
+          const bRect = body.getBoundingClientRect();
+          const iRect = img.getBoundingClientRect();
+          img.style.left = (iRect.left - bRect.left + body.scrollLeft) + 'px';
+          img.style.top = (iRect.top - bRect.top + body.scrollTop) + 'px';
+          img.classList.add('img-free');
+          img.draggable = false;
+        }
+        updateNoteFields({ body: body.innerHTML });
+        setSelImg(s => s ? { ...s, rect: img.getBoundingClientRect() } : s);
+      };
+      const isFree = !!bodyRef.current?.querySelector(`img[data-inline="${selImg.imgId}"]`)?.classList.contains('img-free');
       return h(React.Fragment, null,
         h('div', { className: 'no-print', onPointerDown: e => { if (e.pointerType === 'mouse') e.preventDefault(); },
           style: { position: 'fixed', top: Math.max(4, r.top - 40), left: r.left, zIndex: 400,
@@ -3597,6 +3647,11 @@ function App() {
             style: { ...btnStyle, color: isRow ? '#fbbf24' : '#94a3b8', background: isRow ? 'rgba(251,191,36,.2)' : 'none', borderRadius: 4 },
             onClick: toggleRow, title: isRow ? '切換為獨排' : '切換為並排（多張圖片靠在一起）'
           }, isRow ? '↕ 獨排' : '↔ 並排'),
+          h('div', { style: { width: 1, background: '#4b5563', margin: '4px 2px', alignSelf: 'stretch' } }),
+          h('button', {
+            style: { ...btnStyle, color: isFree ? '#fbbf24' : '#94a3b8', background: isFree ? 'rgba(251,191,36,.2)' : 'none', borderRadius: 4 },
+            onClick: toggleFree, title: isFree ? '取消自由擺放（回到文字排列）' : '自由擺放（可拖曳到任意位置，不受文字排列影響）'
+          }, isFree ? '🔓 自由' : '📌 定位'),
           h('div', { style: { width: 1, background: '#4b5563', margin: '4px 2px', alignSelf: 'stretch' } }),
           h('button', { style: { ...btnStyle, color: '#5eead4' },
             onClick: () => {
