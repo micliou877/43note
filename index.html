@@ -126,7 +126,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/27 14:19";
+const BUILD_TIME = "2026/07/28 12:52";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1480,8 +1480,8 @@ function App() {
     if (!user) { setAllTasksMeta([]); overdueAlertShownRef.current = false; return; }
     return onSnapshot(collection(db, `users/${user.uid}/tasks`), (snap) => {
       const list = snap.docs.map(d => {
-        const { projectId, dueDate, done, deleted, title } = d.data();
-        return { id: d.id, projectId, dueDate, done, deleted, title };
+        const { projectId, dueDate, done, deleted, title, noteIds } = d.data();
+        return { id: d.id, projectId, dueDate, done, deleted, title, noteIds };
       });
       setAllTasksMeta(list);
       if (!overdueAlertShownRef.current) {
@@ -1534,11 +1534,12 @@ function App() {
       snap => setAllTasksFull(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
   }, [user, showAllTasks]);
 
-  // 「所有任務」是跨專案畫面，任務標記的筆記可能不在目前載入的 notes 裡，需要另外查詢標題
+  // 「所有任務」和「逾期任務提醒」都是跨專案畫面，任務標記的筆記可能不在目前載入的 notes 裡，需要另外查詢標題
   useEffect(() => {
-    if (!user || !showAllTasks) return;
+    if (!user) return;
     const missing = new Set();
     allTasksFull.forEach(t => (t.noteIds || []).forEach(id => { if (!noteTitleCache[id]) missing.add(id); }));
+    (overdueModal || []).forEach(t => (t.noteIds || []).forEach(id => { if (!noteTitleCache[id]) missing.add(id); }));
     if (missing.size === 0) return;
     let cancelled = false;
     (async () => {
@@ -1556,7 +1557,7 @@ function App() {
       });
     })();
     return () => { cancelled = true; };
-  }, [user, showAllTasks, allTasksFull]);
+  }, [user, showAllTasks, allTasksFull, overdueModal]);
 
   // Projects
   const createProject = async (name) => {
@@ -2356,6 +2357,15 @@ function App() {
               h('div', { style: { fontSize: 11, color: '#94a3b8', marginTop: 3, display: 'flex', gap: 6, flexWrap: 'wrap' } },
                 projName && h('span', null, `📁 ${projName}`),
                 h('span', { style: { color: '#dc2626', fontWeight: 500 } }, due?.text || t.dueDate)
+              ),
+              t.noteIds?.length > 0 && h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 } },
+                ...t.noteIds.map(nid => {
+                  const meta = noteTitleCache[nid];
+                  if (!meta) return null;
+                  return h('span', { key: nid, onClick: (e) => { e.stopPropagation(); setOverdueModal(null); openLinkedNote(nid, meta.projectId || t.projectId); },
+                    style: { display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#2563eb', background: '#eff6ff', padding: '1px 7px', borderRadius: 10, cursor: 'pointer', border: '1px solid #dbeafe' } },
+                    `📝 ${meta.title}`);
+                })
               )
             )
           );
