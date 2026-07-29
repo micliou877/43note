@@ -127,7 +127,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/29 12:48";
+const BUILD_TIME = "2026/07/29 13:36";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1855,15 +1855,23 @@ function App() {
 
     const processList = async (node, ordered, indent) => {
       let n = 1;
-      for (const li of Array.from(node.children)) {
-        if (li.tagName.toLowerCase() !== 'li') continue;
-        const kids = Array.from(li.childNodes);
-        const blockKids = kids.filter(isBlockNode);
-        const inlineKids = kids.filter(k => !isBlockNode(k));
-        const prefix = ordered ? `${n++}. ` : '• ';
-        const runs = await collectRuns(inlineKids, {});
-        paras.push(new Paragraph({ children: [new TextRun(prefix), ...runs], indent }));
-        for (const bk of blockKids) await processBlock(bk, { left: (indent?.left || 0) + 720 });
+      for (const child of Array.from(node.children)) {
+        const tag = child.tagName.toLowerCase();
+        if (tag === 'li') {
+          const kids = Array.from(child.childNodes);
+          const blockKids = kids.filter(isBlockNode);
+          const inlineKids = kids.filter(k => !isBlockNode(k));
+          const prefix = ordered ? `${n++}. ` : '• ';
+          const runs = await collectRuns(inlineKids, {});
+          paras.push(new Paragraph({ children: [new TextRun(prefix), ...runs], indent }));
+          for (const bk of blockKids) await processBlock(bk, { left: (indent?.left || 0) + 720 });
+        } else if (tag === 'ul' || tag === 'ol') {
+          // 瀏覽器產生巢狀清單時常把子清單直接放在 <li> 外面、跟 <li> 平級，
+          // 而不是包在 <li> 裡面；當成上一個項目的子清單處理，避免整段被跳過
+          await processList(child, tag === 'ol', { left: (indent?.left || 0) + 720 });
+        } else {
+          await processBlock(child, indent);
+        }
       }
     };
 
