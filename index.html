@@ -114,7 +114,7 @@ import { flushSync } from "react-dom";
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore, collection, query, orderBy, where, onSnapshot, addDoc, deleteDoc, doc, getDoc, updateDoc, serverTimestamp, writeBatch, getDocs, deleteField, limit } from "firebase/firestore";
-import { Document, Paragraph, TextRun, ImageRun, HeadingLevel, Packer } from "docx";
+import { Document, Paragraph, TextRun, ImageRun, HeadingLevel, Packer, ShadingType, UnderlineType } from "docx";
 
 // ════════════════════════════════════════════════════════════════
 const firebaseConfig = {
@@ -127,7 +127,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/07/28 15:21";
+const BUILD_TIME = "2026/07/29 12:48";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1762,62 +1762,156 @@ function App() {
       return 'jpg';
     };
 
-    const makeImgPara = async (dataUrl) => {
+    const makeImgRun = async (dataUrl) => {
       const size = await getImgSize(dataUrl);
-      return new Paragraph({
-        children: [new ImageRun({ data: dataUrlToUint8(dataUrl), transformation: size, type: getImgType(dataUrl) })]
-      });
+      return new ImageRun({ data: dataUrlToUint8(dataUrl), transformation: size, type: getImgType(dataUrl) });
+    };
+    const makeImgPara = async (dataUrl) => new Paragraph({ children: [await makeImgRun(dataUrl)] });
+
+    // rgb(...)/#hex 轉成 docx 需要的 6 碼 hex（不含 #）
+    const rgbToHex = (c) => {
+      if (!c) return null;
+      c = c.trim();
+      if (!c || c === 'transparent') return null;
+      if (c.startsWith('#')) return c.slice(1);
+      const m = c.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+      if (!m) return null;
+      return [1, 2, 3].map(i => Number(m[i]).toString(16).padStart(2, '0')).join('');
     };
 
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = activeNote?.body || '';
+    const BLOCK_TAGS = ['div', 'p', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote'];
+    const isBlockNode = (n) => n.nodeType === Node.ELEMENT_NODE &&
+      (BLOCK_TAGS.includes(n.tagName.toLowerCase()) || n.classList?.contains('page-break'));
+
+    // 收集一段「行內」內容（文字/粗體/斜體/底線/刪除線/文字顏色/螢光/行內圖片）。
+    // <br> 用 TextRun 的 break 呈現換行，維持跟畫面上一致的斷行，不會把兩行黏在一起。
+    const collectRuns = async (nodesOrNode, baseFmt) => {
+      const list = Array.isArray(nodesOrNode) ? nodesOrNode : [nodesOrNode];
+      const runs = [];
+      const walk = async (n, f) => {
+        if (n.nodeType === Node.TEXT_NODE) {
+          if (n.textContent) runs.push(new TextRun({
+            text: n.textContent,
+            bold: f.bold, italics: f.italic,
+            underline: f.underline ? { type: UnderlineType.SINGLE } : undefined,
+            strike: f.strike,
+            color: f.color || undefined,
+            shading: f.highlight ? { type: ShadingType.CLEAR, fill: f.highlight } : undefined,
+          }));
+          return;
+        }
+        if (n.nodeType !== Node.ELEMENT_NODE) return;
+        const tag = n.tagName.toLowerCase();
+        if (tag === 'br') { runs.push(new TextRun({ text: '', break: 1 })); return; }
+        if (tag === 'img') {
+          const src = n.getAttribute('src') || '';
+          if (src.startsWith('data:')) runs.push(await makeImgRun(src));
+          return;
+        }
+        const nf = { ...f };
+        if (tag === 'b' || tag === 'strong') nf.bold = true;
+        if (tag === 'i' || tag === 'em') nf.italic = true;
+        if (tag === 'u') nf.underline = true;
+        if (tag === 's' || tag === 'strike' || tag === 'del') nf.strike = true;
+        const style = n.style;
+        if (style?.fontWeight && (style.fontWeight === 'bold' || parseInt(style.fontWeight, 10) >= 600)) nf.bold = true;
+        if (style?.fontStyle === 'italic') nf.italic = true;
+        if ((style?.textDecorationLine || style?.textDecoration || '').includes('underline')) nf.underline = true;
+        const colorHex = rgbToHex(tag === 'font' ? n.getAttribute('color') : style?.color);
+        if (colorHex) nf.color = colorHex;
+        const bgHex = rgbToHex(style?.backgroundColor);
+        if (bgHex) nf.highlight = bgHex;
+        for (const child of Array.from(n.childNodes)) await walk(child, nf);
+      };
+      for (const n of list) await walk(n, baseFmt || {});
+      return runs;
+    };
+
     const paras = [];
-
     paras.push(new Paragraph({ text: title, heading: HeadingLevel.HEADING_1 }));
+    const lvls = [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3, HeadingLevel.HEADING_4, HeadingLevel.HEADING_5, HeadingLevel.HEADING_6];
 
-    const processNode = async (node) => {
+    // 一般容器（div/p/blockquote）：若內含巢狀 block 元素（例如從外部貼上內容常見的巢狀 div），
+    // 逐一拆成獨立段落；沒有巢狀 block 就整個容器當一行輸出，跟畫面排列一致
+    const processContainer = async (node, indent) => {
+      const kids = Array.from(node.childNodes);
+      if (kids.some(isBlockNode)) {
+        let buffer = [];
+        const flush = async () => {
+          const runs = await collectRuns(buffer, {});
+          if (runs.length) paras.push(new Paragraph({ children: runs, indent }));
+          buffer = [];
+        };
+        for (const kid of kids) {
+          if (isBlockNode(kid)) { await flush(); await processBlock(kid, indent); }
+          else buffer.push(kid);
+        }
+        await flush();
+      } else {
+        const runs = await collectRuns(node, {});
+        paras.push(runs.length ? new Paragraph({ children: runs, indent }) : new Paragraph({ indent }));
+      }
+    };
+
+    const processList = async (node, ordered, indent) => {
+      let n = 1;
+      for (const li of Array.from(node.children)) {
+        if (li.tagName.toLowerCase() !== 'li') continue;
+        const kids = Array.from(li.childNodes);
+        const blockKids = kids.filter(isBlockNode);
+        const inlineKids = kids.filter(k => !isBlockNode(k));
+        const prefix = ordered ? `${n++}. ` : '• ';
+        const runs = await collectRuns(inlineKids, {});
+        paras.push(new Paragraph({ children: [new TextRun(prefix), ...runs], indent }));
+        for (const bk of blockKids) await processBlock(bk, { left: (indent?.left || 0) + 720 });
+      }
+    };
+
+    const processBlock = async (node, indent) => {
       if (node.nodeType === Node.TEXT_NODE) {
-        const t = node.textContent;
-        if (t.trim()) paras.push(new Paragraph({ children: [new TextRun(t)] }));
+        if (node.textContent.trim()) paras.push(new Paragraph({ children: [new TextRun(node.textContent)], indent }));
         return;
       }
       if (node.nodeType !== Node.ELEMENT_NODE) return;
-
       const tag = node.tagName.toLowerCase();
 
+      // 分頁符號標記只在編輯畫面提示用，匯出時轉成真正的 Word 分頁，不要把提示文字塞進內容
+      if (node.classList?.contains('page-break')) { paras.push(new Paragraph({ children: [], pageBreakBefore: true })); return; }
       if (tag === 'img') {
         const src = node.getAttribute('src') || '';
         if (src.startsWith('data:')) paras.push(await makeImgPara(src));
         return;
       }
       if (tag === 'br') { paras.push(new Paragraph({})); return; }
-
-      const hasImg = Array.from(node.childNodes).some(n => n.nodeName === 'IMG');
-      if (hasImg) {
-        for (const child of Array.from(node.childNodes)) await processNode(child);
+      if (/^h[1-6]$/.test(tag)) {
+        const runs = await collectRuns(node, {});
+        paras.push(new Paragraph({ children: runs, heading: lvls[parseInt(tag[1], 10) - 1] }));
         return;
       }
+      if (tag === 'blockquote') { await processContainer(node, { left: (indent?.left || 0) + 720 }); return; }
+      if (tag === 'ul') { await processList(node, false, indent); return; }
+      if (tag === 'ol') { await processList(node, true, indent); return; }
 
-      const text = node.textContent || '';
-      if (!text.trim()) return;
-
-      if (/^h[1-6]$/.test(tag)) {
-        const lvls = [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3, HeadingLevel.HEADING_4, HeadingLevel.HEADING_5, HeadingLevel.HEADING_6];
-        paras.push(new Paragraph({ text, heading: lvls[parseInt(tag[1]) - 1] }));
-      } else if (tag === 'blockquote') {
-        paras.push(new Paragraph({ text, indent: { left: 720 } }));
-      } else if (node.classList?.contains('li3')) {
-        paras.push(new Paragraph({ text: '    ▪ ' + text, indent: { left: 720 } }));
-      } else if (node.classList?.contains('li2')) {
-        paras.push(new Paragraph({ text: '  ◦ ' + text, indent: { left: 360 } }));
-      } else if (node.classList?.contains('li1')) {
-        paras.push(new Paragraph({ text: '• ' + text }));
-      } else {
-        paras.push(new Paragraph({ text }));
+      // 自訂條列（li1/li2/li3）：前綴數字/字母/符號已經是文字內容本身，不要再多加一個項目符號
+      const li3 = node.classList?.contains('li3');
+      const li2 = node.classList?.contains('li2');
+      const li1 = node.classList?.contains('li1');
+      if (li1 || li2 || li3) {
+        const runs = await collectRuns(node, {});
+        const left = li3 ? 1440 : li2 ? 720 : 0;
+        paras.push(runs.length ? new Paragraph({ children: runs, indent: { left } }) : new Paragraph({ indent: { left } }));
+        return;
       }
+      if (tag === 'div' || tag === 'p') { await processContainer(node, indent); return; }
+
+      // 其他殘留的行內元素（例如貼上內容留下的 span/font）在頂層時當一行處理
+      const runs = await collectRuns(node, {});
+      if (runs.length) paras.push(new Paragraph({ children: runs, indent }));
     };
 
-    for (const node of Array.from(tempDiv.childNodes)) await processNode(node);
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = activeNote?.body || '';
+    for (const node of Array.from(tempDiv.childNodes)) await processBlock(node, undefined);
 
     for (const im of noteImages) {
       if (im.dataUrl?.startsWith('data:')) paras.push(await makeImgPara(im.dataUrl));
