@@ -42,8 +42,15 @@
 
   /* 👇 手機版 RWD 樣式機制（解決螢幕擠壓問題） */
   .mobile-only { display: none !important; }
-  .resize-handle { width: 5px; flex-shrink: 0; cursor: col-resize; background: transparent; transition: background 0.15s; }
+  .resize-handle { position: relative; width: 5px; flex-shrink: 0; cursor: col-resize; background: transparent; transition: background 0.15s; }
   .resize-handle:hover { background: #0d9488; }
+  .resize-toggle {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 16px; height: 40px; border-radius: 6px; border: 1px solid #e5e7eb; background: #fff;
+    color: #94a3b8; font-size: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,.1); z-index: 5; padding: 0;
+  }
+  .resize-toggle:hover { color: #0d9488; border-color: #0d9488; }
   @media (max-width: 768px) {
     .hide-on-mobile { display: none !important; }
     .mobile-full-width {
@@ -127,7 +134,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/08/12 16:06";
+const BUILD_TIME = "2026/08/12 17:12";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1424,6 +1431,9 @@ function App() {
   // 👇 這是控制手機版顯示哪一個欄位的狀態
   const [mobileView, setMobileView] = useState('sidebar'); // 'sidebar' | 'list' | 'editor'
   const [sidebarWidth, setSidebarWidth] = useState(() => parseInt(localStorage.getItem('sidebarW') || '230'));
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sidebarCollapsed') === '1');
+  const [listWidth, setListWidth] = useState(() => parseInt(localStorage.getItem('listW') || '290'));
+  const [listCollapsed, setListCollapsed] = useState(() => localStorage.getItem('listCollapsed') === '1');
   const [focusMode, setFocusMode] = useState(false); // 寫筆記時可切換全螢幕，隱藏左側專案/筆記列表
 
   const lastLocalEdit = useRef(0);
@@ -2807,7 +2817,9 @@ function App() {
   });
 
   // Sidebar 拖曳調整寬度
+  const toggleSidebarCollapsed = () => setSidebarCollapsed(v => { localStorage.setItem('sidebarCollapsed', v ? '0' : '1'); return !v; });
   const startSidebarResize = (e) => {
+    if (sidebarCollapsed) { toggleSidebarCollapsed(); return; }
     e.preventDefault();
     const startX = e.clientX;
     const startW = sidebarWidth;
@@ -2825,10 +2837,49 @@ function App() {
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
   };
-  const resizeHandle = h('div', { className: 'resize-handle hide-on-mobile', onMouseDown: startSidebarResize });
+  const resizeHandle = h('div', { className: 'resize-handle hide-on-mobile', onMouseDown: startSidebarResize },
+    h('button', {
+      className: 'resize-toggle',
+      onMouseDown: e => e.stopPropagation(),
+      onClick: toggleSidebarCollapsed,
+      title: sidebarCollapsed ? '展開專案列表' : '收合專案列表'
+    }, sidebarCollapsed ? '›' : '‹')
+  );
+
+  // 清單欄 拖曳調整寬度
+  const toggleListCollapsed = () => setListCollapsed(v => { localStorage.setItem('listCollapsed', v ? '0' : '1'); return !v; });
+  const startListResize = (e) => {
+    if (listCollapsed) { toggleListCollapsed(); return; }
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = listWidth;
+    const onMove = (e) => setListWidth(Math.max(200, Math.min(560, startW + e.clientX - startX)));
+    const onUp = (e) => {
+      const w = Math.max(200, Math.min(560, startW + e.clientX - startX));
+      localStorage.setItem('listW', w);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+  const listResizeHandle = h('div', { className: 'resize-handle hide-on-mobile', onMouseDown: startListResize },
+    h('button', {
+      className: 'resize-toggle',
+      onMouseDown: e => e.stopPropagation(),
+      onClick: toggleListCollapsed,
+      title: listCollapsed ? '展開筆記/任務清單' : '收合筆記/任務清單'
+    }, listCollapsed ? '›' : '‹')
+  );
 
   // 渲染專案列表 (Sidebar)
-  const sidebar = h('aside', { className: mobileView === 'sidebar' ? 'mobile-full-width' : 'hide-on-mobile', style: { ...S.sidebar, width: sidebarWidth }, ...swipeHandlers('sidebar') },
+  const sidebar = h('aside', { className: mobileView === 'sidebar' ? 'mobile-full-width' : 'hide-on-mobile',
+    style: { ...S.sidebar, width: sidebarCollapsed ? 0 : sidebarWidth, padding: sidebarCollapsed ? 0 : S.sidebar.padding, borderRight: sidebarCollapsed ? 'none' : S.sidebar.borderRight, overflow: 'hidden' },
+    ...swipeHandlers('sidebar') },
     h('div', { style: { ...S.brand, flexDirection: 'column', alignItems: 'flex-start', gap: 0 } },
       h('div', { style: { display: 'flex', alignItems: 'center', width: '100%', marginBottom: 2 } },
         h('span', null, '📷 照片筆記'),
@@ -3270,7 +3321,8 @@ function App() {
     !focusMode && resizeHandle,
 
     // 渲染清單 (List Column)
-    !focusMode && activeProject && h('section', { className: mobileView === 'list' ? 'mobile-full-width' : 'hide-on-mobile', style: S.listCol, ...swipeHandlers('list') },
+    !focusMode && activeProject && h('section', { className: mobileView === 'list' ? 'mobile-full-width' : 'hide-on-mobile',
+      style: { ...S.listCol, width: listCollapsed ? 0 : listWidth, borderRight: listCollapsed ? 'none' : S.listCol.borderRight, overflow: 'hidden' }, ...swipeHandlers('list') },
       h('div', { style: S.listHead },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
           h('button', { className: 'mobile-only', onClick: () => setMobileView('sidebar'), style: { background: 'none', border: 'none', fontSize: 24, padding: '0 4px', cursor: 'pointer', color: '#64748b' } }, '‹'),
@@ -3533,6 +3585,7 @@ function App() {
         )
       )
     ),
+    !focusMode && activeProject && listResizeHandle,
 
     // 渲染筆記編輯器 (Editor Column)
     h('main', { className: mobileView === 'editor' ? 'mobile-full-width' : 'hide-on-mobile', style: S.editorCol, ...swipeHandlers('editor') },
