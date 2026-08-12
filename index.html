@@ -127,7 +127,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/08/12 14:27";
+const BUILD_TIME = "2026/08/12 14:58";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -407,15 +407,18 @@ function Login() {
 function CompleteTaskModal({ task, onConfirm, onCancel, zIndex }) {
   const [reason, setReason] = useState('');
   const [relay, setRelay] = useState(false);
-  const [relayTitle, setRelayTitle] = useState(task?.title || '');
+  const [relayTitle, setRelayTitle] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const relayBlocked = relay && !relayTitle.trim();
+
   const submit = async () => {
-    if (!reason.trim() || loading) return;
+    if (!reason.trim() || loading || relayBlocked) return;
     setLoading(true);
     try {
-      await onConfirm(reason.trim(), relay ? (relayTitle.trim() || task.title) : null);
+      await onConfirm(reason.trim(), relay ? relayTitle.trim() : null);
     } catch (err) {
+      alert('完成任務失敗：' + (err?.message || err));
       setLoading(false);
     }
   };
@@ -423,6 +426,7 @@ function CompleteTaskModal({ task, onConfirm, onCancel, zIndex }) {
   return h('div', { style: { ...S.modalOverlay, ...(zIndex ? { zIndex } : {}) }, onClick: (e) => e.target === e.currentTarget && onCancel() },
     h('div', { style: S.modalCard },
       h('h3', { style: S.modalTitle }, '完成任務'),
+      task?.title && h('p', { style: { ...S.modalSub, fontWeight: 500, color: '#1f2937' } }, task.title),
       h('p', { style: S.modalSub }, '記錄一下完成的方式或結果，之後可以回顧。'),
       h('textarea', { autoFocus: true, value: reason, onChange: e => setReason(e.target.value),
         placeholder: '例如：已親送至客戶辦公室、編號 A-23', style: { ...S.modalInput, minHeight: 80, resize: 'vertical' }, disabled: loading }),
@@ -432,12 +436,12 @@ function CompleteTaskModal({ task, onConfirm, onCancel, zIndex }) {
       ),
       relay && h('div', { style: { marginTop: 8 } },
         h('label', { style: { fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 } }, '後續任務內容'),
-        h('input', { value: relayTitle, onChange: e => setRelayTitle(e.target.value),
+        h('input', { autoFocus: true, value: relayTitle, onChange: e => setRelayTitle(e.target.value),
           placeholder: '接下來要做什麼？', style: S.modalInput, disabled: loading })
       ),
       h('div', { style: S.modalActions },
         h('button', { onClick: onCancel, disabled: loading, style: S.ghostBtn }, '取消'),
-        h('button', { onClick: submit, disabled: !reason.trim() || loading, style: { ...S.primaryBtn, opacity: reason.trim() ? 1 : 0.5 } }, loading ? '處理中…' : '完成')
+        h('button', { onClick: submit, disabled: !reason.trim() || loading || relayBlocked, style: { ...S.primaryBtn, opacity: (reason.trim() && !relayBlocked) ? 1 : 0.5 } }, loading ? '處理中…' : '完成')
       )
     )
   );
@@ -2252,6 +2256,13 @@ function App() {
         pinned: false, sortOrder: Date.now(), created: serverTimestamp(),
         dueDate: null, reminderOffset: null, reminded: false, recur: null, recurInterval: null, noteIds: [],
       });
+      if (!activeProject || activeProject.id !== task.projectId || tab !== 'tasks' || showAllTasks) {
+        const proj = projects.find(p => p.id === task.projectId);
+        if (proj) setActiveProject(proj);
+        setShowAllTasks(false);
+        setTab('tasks');
+        setMobileView('list');
+      }
     }
     scrollToBottomRef.current = true;
     setOverdueModal(prev => {
@@ -2570,6 +2581,7 @@ function App() {
     return getSafeTime(b.created) - getSafeTime(a.created);
   });
   const filtered = sortedNotes.filter((n) => !search || (n.title || '').includes(search) || stripHtml(n.body || '').includes(search));
+  const filteredTasks = sortedTasks.filter((t) => !search || (t.title || '').includes(search) || (t.doneReason || '').includes(search));
 
   const globalResults = (globalSearchOpen && globalSearchQuery.trim().length >= 1) ? (() => {
     const q = globalSearchQuery;
@@ -3163,10 +3175,11 @@ function App() {
       
       dbError && h('div', { style: { background: '#fecaca', color: '#991b1b', padding: '10px 14px', margin: '14px 14px 0', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' } }, `⚠️ ${dbError}`),
 
-      tab === 'notes' && h('div', { style: S.searchBox },
+      (tab === 'notes' || tab === 'tasks') && h('div', { style: S.searchBox },
         h('span', null, '🔍'),
-        h('input', { value: search, onChange: (e) => setSearch(e.target.value), placeholder: '搜尋筆記…', style: S.searchInput }),
-        h('select', { value: noteSort, onChange: (e) => setNoteSort(e.target.value),
+        h('input', { value: search, onChange: (e) => setSearch(e.target.value), placeholder: tab === 'tasks' ? '搜尋任務…' : '搜尋筆記…', style: S.searchInput }),
+        search && h('button', { onClick: () => setSearch(''), style: { background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: 13, padding: 0, flexShrink: 0 } }, '✕'),
+        tab === 'notes' && h('select', { value: noteSort, onChange: (e) => setNoteSort(e.target.value),
           style: { border: 'none', background: 'transparent', color: '#94a3b8', fontSize: 11, cursor: 'pointer', outline: 'none', flexShrink: 0 } },
           h('option', { value: 'updated' }, '最近編輯'),
           h('option', { value: 'created' }, '建立時間'),
@@ -3255,15 +3268,15 @@ function App() {
               h('option', { value: 'due' }, '截止日期'),
               h('option', { value: 'done' }, '未完成優先'))
           ),
-          sortedTasks.length === 0 && h('div', { style: S.empty }, '點「新任務」開始'),
-          ...sortedTasks.map(t =>
+          filteredTasks.length === 0 && h('div', { style: S.empty }, search ? '找不到符合的任務' : '點「新任務」開始'),
+          ...filteredTasks.map(t =>
             h('div', { key: t.id,
               draggable: tab === 'tasks',
               onDragStart: (e) => { dragId.current = t.id; dragType.current = 'task'; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.style.opacity = '0.4'; },
               onDragEnd:   (e) => { e.currentTarget.style.opacity = '1'; dragId.current = null; },
               onDragOver:  (e) => { e.preventDefault(); e.currentTarget.style.borderTop = '2px solid #0d9488'; },
               onDragLeave: (e) => { e.currentTarget.style.borderTop = ''; },
-              onDrop:      (e) => { e.preventDefault(); e.currentTarget.style.borderTop = ''; if (dragId.current && dragId.current !== t.id && dragType.current === 'task') reorder('task', sortedTasks, dragId.current, t.id); dragId.current = null; },
+              onDrop:      (e) => { e.preventDefault(); e.currentTarget.style.borderTop = ''; if (dragId.current && dragId.current !== t.id && dragType.current === 'task') reorder('task', filteredTasks, dragId.current, t.id); dragId.current = null; },
               style: S.taskItem },
               h('span', { style: { cursor: 'grab', color: '#cbd5e1', fontSize: 12, userSelect: 'none', alignSelf: 'flex-start', paddingTop: 3, marginRight: -4 } }, '⠿'),
               h('div', {
