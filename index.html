@@ -127,7 +127,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/08/04 10:15";
+const BUILD_TIME = "2026/08/12 14:27";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -404,16 +404,17 @@ function Login() {
   );
 }
 
-function TextModal({ title, subtitle, placeholder, initial, confirmText, onConfirm, onCancel, multiline, zIndex }) {
-  const [val, setVal] = useState(initial || '');
+function CompleteTaskModal({ task, onConfirm, onCancel, zIndex }) {
+  const [reason, setReason] = useState('');
+  const [relay, setRelay] = useState(false);
+  const [relayTitle, setRelayTitle] = useState(task?.title || '');
   const [loading, setLoading] = useState(false);
-  const [isComposing, setIsComposing] = useState(false);
 
   const submit = async () => {
-    if (!val.trim() || loading) return;
+    if (!reason.trim() || loading) return;
     setLoading(true);
     try {
-      await onConfirm(val.trim());
+      await onConfirm(reason.trim(), relay ? (relayTitle.trim() || task.title) : null);
     } catch (err) {
       setLoading(false);
     }
@@ -421,21 +422,22 @@ function TextModal({ title, subtitle, placeholder, initial, confirmText, onConfi
 
   return h('div', { style: { ...S.modalOverlay, ...(zIndex ? { zIndex } : {}) }, onClick: (e) => e.target === e.currentTarget && onCancel() },
     h('div', { style: S.modalCard },
-      h('h3', { style: S.modalTitle }, title),
-      subtitle && h('p', { style: S.modalSub }, subtitle),
-      multiline
-        ? h('textarea', { autoFocus: true, value: val, onChange: e => setVal(e.target.value), placeholder, style: { ...S.modalInput, minHeight: 80, resize: 'vertical' }, disabled: loading })
-        : h('input', { autoFocus: true, value: val, onChange: e => setVal(e.target.value),
-            onCompositionStart: () => setIsComposing(true),
-            onCompositionEnd: () => setIsComposing(false),
-            onKeyDown: e => { 
-              if (e.key === 'Enter' && !isComposing) submit(); 
-              if (e.key === 'Escape') onCancel(); 
-            },
-            placeholder, style: S.modalInput, disabled: loading }),
+      h('h3', { style: S.modalTitle }, '完成任務'),
+      h('p', { style: S.modalSub }, '記錄一下完成的方式或結果，之後可以回顧。'),
+      h('textarea', { autoFocus: true, value: reason, onChange: e => setReason(e.target.value),
+        placeholder: '例如：已親送至客戶辦公室、編號 A-23', style: { ...S.modalInput, minHeight: 80, resize: 'vertical' }, disabled: loading }),
+      h('label', { style: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, cursor: 'pointer', fontSize: 13, color: '#374151' } },
+        h('input', { type: 'checkbox', checked: relay, onChange: e => setRelay(e.target.checked), disabled: loading }),
+        h('span', null, '🔁 任務接力（完成後建立後續任務）')
+      ),
+      relay && h('div', { style: { marginTop: 8 } },
+        h('label', { style: { fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 } }, '後續任務內容'),
+        h('input', { value: relayTitle, onChange: e => setRelayTitle(e.target.value),
+          placeholder: '接下來要做什麼？', style: S.modalInput, disabled: loading })
+      ),
       h('div', { style: S.modalActions },
         h('button', { onClick: onCancel, disabled: loading, style: S.ghostBtn }, '取消'),
-        h('button', { onClick: submit, disabled: !val.trim() || loading, style: { ...S.primaryBtn, opacity: val.trim() ? 1 : 0.5 } }, loading ? '處理中…' : (confirmText || '確定'))
+        h('button', { onClick: submit, disabled: !reason.trim() || loading, style: { ...S.primaryBtn, opacity: reason.trim() ? 1 : 0.5 } }, loading ? '處理中…' : '完成')
       )
     )
   );
@@ -2230,7 +2232,7 @@ function App() {
     });
     setSetDueDateTask(null);
   };
-  const completeTask = async (reason) => {
+  const completeTask = async (reason, relayTitle) => {
     const task = tasks.find(t => t.id === completeTaskId) || allTasksFull.find(t => t.id === completeTaskId);
     await updateDoc(doc(db, `users/${user.uid}/tasks/${completeTaskId}`), {
       done: true, doneReason: reason, doneAt: serverTimestamp()
@@ -2242,6 +2244,13 @@ function App() {
         pinned: false, sortOrder: Date.now(), created: serverTimestamp(),
         dueDate: toLocalDTStr(nextDate), reminderOffset: task.reminderOffset ?? null,
         reminded: false, recur: task.recur, recurInterval: task.recurInterval ?? null,
+      });
+    }
+    if (task && relayTitle) {
+      await addDoc(collection(db, `users/${user.uid}/tasks`), {
+        projectId: task.projectId, title: relayTitle, done: false, deleted: false, images: [],
+        pinned: false, sortOrder: Date.now(), created: serverTimestamp(),
+        dueDate: null, reminderOffset: null, reminded: false, recur: null, recurInterval: null, noteIds: [],
       });
     }
     scrollToBottomRef.current = true;
@@ -2996,10 +3005,9 @@ function App() {
         onSave: (dueDate, reminderOffset, recur, recurInterval) => updateTaskDueDate(setDueDateTask.id, dueDate, reminderOffset, recur, recurInterval),
         onCancel: () => setSetDueDateTask(null)
       }),
-      completeTaskId && h(TextModal, {
-        title: '完成任務', subtitle: '記錄一下完成的方式或結果，之後可以回顧。',
-        placeholder: '例如：已親送至客戶辦公室、編號 A-23',
-        multiline: true, confirmText: '完成', zIndex: 700,
+      completeTaskId && h(CompleteTaskModal, {
+        task: tasks.find(t => t.id === completeTaskId) || allTasksFull.find(t => t.id === completeTaskId),
+        zIndex: 700,
         onConfirm: completeTask, onCancel: () => setCompleteTaskId(null)
       }),
       h('main', { className: mobileView === 'list' ? 'mobile-full-width' : 'hide-on-mobile', style: { ...S.editorCol, overflow: 'hidden' }, ...swipeHandlers('alltasks') },
@@ -3798,10 +3806,9 @@ function App() {
       onSave: (dueDate, reminderOffset, recur, recurInterval) => updateTaskDueDate(setDueDateTask.id, dueDate, reminderOffset, recur, recurInterval),
       onCancel: () => setSetDueDateTask(null)
     }),
-    completeTaskId && h(TextModal, {
-      title: '完成任務', subtitle: '記錄一下完成的方式或結果，之後可以回顧。',
-      placeholder: '例如：已親送至客戶辦公室、編號 A-23',
-      multiline: true, confirmText: '完成', zIndex: 700,
+    completeTaskId && h(CompleteTaskModal, {
+      task: tasks.find(t => t.id === completeTaskId) || allTasksFull.find(t => t.id === completeTaskId),
+      zIndex: 700,
       onConfirm: completeTask, onCancel: () => setCompleteTaskId(null)
     }),
     folderMenu && h('div', { style: S.modalOverlay, onClick: () => setFolderMenu(null) },
