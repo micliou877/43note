@@ -127,7 +127,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/08/12 14:58";
+const BUILD_TIME = "2026/08/12 15:42";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -404,19 +404,33 @@ function Login() {
   );
 }
 
-function CompleteTaskModal({ task, onConfirm, onCancel, zIndex }) {
+function CompleteTaskModal({ task, notes, onConfirm, onCancel, zIndex }) {
   const [reason, setReason] = useState('');
   const [relay, setRelay] = useState(false);
   const [relayTitle, setRelayTitle] = useState('');
+  const [relayDueDate, setRelayDueDate] = useState('');
+  const [relayReminderOffset, setRelayReminderOffset] = useState('');
+  const [relayRecur, setRelayRecur] = useState('');
+  const [relayRecurInterval, setRelayRecurInterval] = useState('7');
+  const [relayNoteIds, setRelayNoteIds] = useState([]);
   const [loading, setLoading] = useState(false);
 
+  const toggleRelayNote = (id) => setRelayNoteIds(cur => cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id]);
   const relayBlocked = relay && !relayTitle.trim();
 
   const submit = async () => {
     if (!reason.trim() || loading || relayBlocked) return;
     setLoading(true);
     try {
-      await onConfirm(reason.trim(), relay ? relayTitle.trim() : null);
+      const relayPayload = relay ? {
+        title: relayTitle.trim(),
+        dueDate: relayDueDate || null,
+        reminderOffset: relayReminderOffset !== '' ? parseInt(relayReminderOffset) : null,
+        recur: relayDueDate && relayRecur ? relayRecur : null,
+        recurInterval: relayDueDate && relayRecur === 'custom' ? (parseInt(relayRecurInterval) || 7) : null,
+        noteIds: relayNoteIds,
+      } : null;
+      await onConfirm(reason.trim(), relayPayload);
     } catch (err) {
       alert('完成任務失敗：' + (err?.message || err));
       setLoading(false);
@@ -424,7 +438,7 @@ function CompleteTaskModal({ task, onConfirm, onCancel, zIndex }) {
   };
 
   return h('div', { style: { ...S.modalOverlay, ...(zIndex ? { zIndex } : {}) }, onClick: (e) => e.target === e.currentTarget && onCancel() },
-    h('div', { style: S.modalCard },
+    h('div', { style: { ...S.modalCard, maxHeight: '85vh', overflowY: 'auto' } },
       h('h3', { style: S.modalTitle }, '完成任務'),
       task?.title && h('p', { style: { ...S.modalSub, fontWeight: 500, color: '#1f2937' } }, task.title),
       h('p', { style: S.modalSub }, '記錄一下完成的方式或結果，之後可以回顧。'),
@@ -437,7 +451,49 @@ function CompleteTaskModal({ task, onConfirm, onCancel, zIndex }) {
       relay && h('div', { style: { marginTop: 8 } },
         h('label', { style: { fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 } }, '後續任務內容'),
         h('input', { autoFocus: true, value: relayTitle, onChange: e => setRelayTitle(e.target.value),
-          placeholder: '接下來要做什麼？', style: S.modalInput, disabled: loading })
+          placeholder: '接下來要做什麼？', style: { ...S.modalInput, marginBottom: 10 }, disabled: loading }),
+        h('label', { style: { fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 } }, '截止日期 / 時間（選填）'),
+        h('input', { type: 'datetime-local', value: relayDueDate, onChange: e => setRelayDueDate(e.target.value),
+          style: { ...S.modalInput, fontSize: 13 }, disabled: loading }),
+        relayDueDate && h('div', { style: { marginBottom: 16 } },
+          h('label', { style: { fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 } }, '提醒'),
+          h('select', { value: relayReminderOffset, onChange: e => setRelayReminderOffset(e.target.value),
+            style: { width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 10, fontSize: 13, outline: 'none', background: '#fff' } },
+            h('option', { value: '' }, '不提醒'),
+            h('option', { value: '0' }, '到時提醒'),
+            h('option', { value: '15' }, '提前 15 分鐘'),
+            h('option', { value: '30' }, '提前 30 分鐘'),
+            h('option', { value: '60' }, '提前 1 小時'),
+            h('option', { value: '1440' }, '提前 1 天')
+          )
+        ),
+        relayDueDate && h('div', { style: { marginBottom: 16 } },
+          h('label', { style: { fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 } }, '重複週期'),
+          h('select', { value: relayRecur, onChange: e => setRelayRecur(e.target.value),
+            style: { width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 10, fontSize: 13, outline: 'none', background: '#fff', marginBottom: relayRecur === 'custom' ? 8 : 0 } },
+            h('option', { value: '' }, '不重複'),
+            h('option', { value: 'weekly' }, '每週一次'),
+            h('option', { value: 'monthly' }, '每月一次'),
+            h('option', { value: 'bimonthly' }, '每兩個月一次'),
+            h('option', { value: 'custom' }, '每 N 天一次')
+          ),
+          relayRecur === 'custom' && h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 } },
+            h('span', { style: { fontSize: 13, color: '#374151' } }, '每'),
+            h('input', { type: 'number', min: 1, max: 365, value: relayRecurInterval, onChange: e => setRelayRecurInterval(e.target.value),
+              style: { width: 72, padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, textAlign: 'center', outline: 'none' } }),
+            h('span', { style: { fontSize: 13, color: '#374151' } }, '天重複一次')
+          )
+        ),
+        notes && notes.length > 0 && h('div', { style: { marginBottom: 4 } },
+          h('label', { style: { fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 } }, `🔗 標記相關筆記（選填${relayNoteIds.length ? `，已選 ${relayNoteIds.length} 則` : ''}）`),
+          h('div', { style: { maxHeight: 140, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 10, padding: 6 } },
+            ...notes.map(n => h('label', { key: n.id,
+              style: { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 13, color: '#374151' } },
+              h('input', { type: 'checkbox', checked: relayNoteIds.includes(n.id), onChange: () => toggleRelayNote(n.id) }),
+              h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, n.title || '未命名筆記')
+            ))
+          )
+        )
       ),
       h('div', { style: S.modalActions },
         h('button', { onClick: onCancel, disabled: loading, style: S.ghostBtn }, '取消'),
@@ -526,6 +582,40 @@ function NewTaskModal({ onConfirm, onCancel, notes }) {
       h('div', { style: S.modalActions },
         h('button', { onClick: onCancel, disabled: loading, style: S.ghostBtn }, '取消'),
         h('button', { onClick: submit, disabled: !title.trim() || loading, style: { ...S.primaryBtn, opacity: title.trim() ? 1 : 0.5 } }, loading ? '處理中…' : '建立')
+      )
+    )
+  );
+}
+
+function NoteCaseTagModal({ note, projects, onSave, onCancel }) {
+  const [tagIds, setTagIds] = useState(note?.tags || []);
+  const [loading, setLoading] = useState(false);
+
+  const toggleTag = (id) => setTagIds(cur => cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id]);
+  const options = (projects || []).filter(p => !p.deleted && p.id !== note?.projectId);
+
+  const submit = async () => {
+    if (loading) return;
+    setLoading(true);
+    try { await onSave(tagIds); } catch { setLoading(false); }
+  };
+
+  return h('div', { style: S.modalOverlay, onClick: e => e.target === e.currentTarget && onCancel() },
+    h('div', { style: S.modalCard },
+      h('h3', { style: S.modalTitle }, '🏷️ 標籤相關案件'),
+      h('p', { style: S.modalSub }, '這篇筆記如果也提到其他案件的事，勾選後之後搜尋該案件也能找到這篇筆記。'),
+      options.length > 0
+        ? h('div', { style: { maxHeight: 260, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 10, padding: 6, marginBottom: 16 } },
+            ...options.map(p => h('label', { key: p.id,
+              style: { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 13, color: '#374151' } },
+              h('input', { type: 'checkbox', checked: tagIds.includes(p.id), onChange: () => toggleTag(p.id) }),
+              h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, p.name)
+            ))
+          )
+        : h('p', { style: { ...S.modalSub, marginBottom: 16 } }, '目前沒有其他案件可以標籤。'),
+      h('div', { style: S.modalActions },
+        h('button', { onClick: onCancel, disabled: loading, style: S.ghostBtn }, '取消'),
+        h('button', { onClick: submit, disabled: loading, style: S.primaryBtn }, loading ? '處理中…' : '儲存')
       )
     )
   );
@@ -1308,6 +1398,7 @@ function App() {
   const [completeTaskId, setCompleteTaskId] = useState(null);
   const [editingTask, setEditingTask] = useState(null); // { id, title }
   const [linkNotesTask, setLinkNotesTask] = useState(null); // task being tagged with related notes
+  const [caseTagNote, setCaseTagNote] = useState(null); // note being tagged with related case (project)
   const [noteTitleCache, setNoteTitleCache] = useState({}); // noteId -> { title, projectId } (for cross-project "所有任務" view)
   const [noteSort, setNoteSort] = useState('updated');  // 'updated' | 'created' | 'name'
   const [taskSort, setTaskSort] = useState('created');  // 'created' | 'name' | 'done'
@@ -2236,7 +2327,7 @@ function App() {
     });
     setSetDueDateTask(null);
   };
-  const completeTask = async (reason, relayTitle) => {
+  const completeTask = async (reason, relayPayload) => {
     const task = tasks.find(t => t.id === completeTaskId) || allTasksFull.find(t => t.id === completeTaskId);
     await updateDoc(doc(db, `users/${user.uid}/tasks/${completeTaskId}`), {
       done: true, doneReason: reason, doneAt: serverTimestamp()
@@ -2250,11 +2341,13 @@ function App() {
         reminded: false, recur: task.recur, recurInterval: task.recurInterval ?? null,
       });
     }
-    if (task && relayTitle) {
+    if (task && relayPayload) {
       await addDoc(collection(db, `users/${user.uid}/tasks`), {
-        projectId: task.projectId, title: relayTitle, done: false, deleted: false, images: [],
+        projectId: task.projectId, title: relayPayload.title, done: false, deleted: false, images: [],
         pinned: false, sortOrder: Date.now(), created: serverTimestamp(),
-        dueDate: null, reminderOffset: null, reminded: false, recur: null, recurInterval: null, noteIds: [],
+        dueDate: relayPayload.dueDate, reminderOffset: relayPayload.reminderOffset,
+        reminded: false, recur: relayPayload.recur, recurInterval: relayPayload.recurInterval,
+        noteIds: relayPayload.noteIds,
       });
       if (!activeProject || activeProject.id !== task.projectId || tab !== 'tasks' || showAllTasks) {
         const proj = projects.find(p => p.id === task.projectId);
@@ -2316,6 +2409,11 @@ function App() {
   const updateTaskNoteLinks = async (id, noteIds) => {
     await updateDoc(doc(db, `users/${user.uid}/tasks/${id}`), { noteIds });
     setLinkNotesTask(null);
+  };
+  const updateNoteCaseTags = async (id, tags) => {
+    await updateDoc(doc(db, `users/${user.uid}/notes/${id}`), { tags });
+    setCaseTagNote(null);
+    setActiveNote(cur => (cur && cur.id === id) ? { ...cur, tags } : cur);
   };
   const openLinkedNote = (noteId, projectId) => {
     const local = activeProject?.id === projectId ? notes.find(n => n.id === noteId) : null;
@@ -2580,13 +2678,14 @@ function App() {
     }
     return getSafeTime(b.created) - getSafeTime(a.created);
   });
-  const filtered = sortedNotes.filter((n) => !search || (n.title || '').includes(search) || stripHtml(n.body || '').includes(search));
+  const noteTagNames = (n) => (n.tags || []).map(tid => projects.find(p => p.id === tid)?.name).filter(Boolean);
+  const filtered = sortedNotes.filter((n) => !search || (n.title || '').includes(search) || stripHtml(n.body || '').includes(search) || noteTagNames(n).some(name => name.includes(search)));
   const filteredTasks = sortedTasks.filter((t) => !search || (t.title || '').includes(search) || (t.doneReason || '').includes(search));
 
   const globalResults = (globalSearchOpen && globalSearchQuery.trim().length >= 1) ? (() => {
     const q = globalSearchQuery;
     const matchedNotes = allNotesForSearch
-      .filter(n => (n.title || '').includes(q) || stripHtml(n.body || '').includes(q))
+      .filter(n => (n.title || '').includes(q) || stripHtml(n.body || '').includes(q) || noteTagNames(n).some(name => name.includes(q)))
       .map(n => ({ ...n, _type: 'note' }));
     const matchedTasks = allTasksForSearch
       .filter(t => (t.title || '').includes(q))
@@ -2649,6 +2748,12 @@ function App() {
                   h('span', { style: { fontSize: 11, color: isTask ? '#7c3aed' : '#0d9488', background: isTask ? '#f5f3ff' : '#f0fdfa', padding: '2px 7px', borderRadius: 10, flexShrink: 0 } },
                     isTask ? '任務' : '筆記'),
                   proj && h('span', { style: { fontSize: 11, color: '#64748b', background: '#f1f5f9', padding: '2px 7px', borderRadius: 10, flexShrink: 0 } }, proj.name)
+                ),
+                !isTask && item.tags?.length > 0 && h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 3 } },
+                  ...item.tags.map(tid => {
+                    const tp = projects.find(x => x.id === tid);
+                    return tp && h('span', { key: tid, style: { fontSize: 10.5, color: '#2563eb', background: '#eff6ff', padding: '1px 6px', borderRadius: 8 } }, `🏷️ ${tp.name}`);
+                  })
                 ),
                 !isTask && snippet && h('div', { style: { fontSize: 12.5, color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, snippet),
                 h('div', { style: { fontSize: 11, color: '#cbd5e1', marginTop: 4 } },
@@ -2892,6 +2997,9 @@ function App() {
       h('button', { onClick: () => signOut(auth), style: { ...S.miniBtn, background: '#f1f5f9', color: '#64748b', width: 30, height: 30 }, title: '登出' }, '⎋'))
   );
 
+  const completingTask = completeTaskId ? (tasks.find(t => t.id === completeTaskId) || allTasksFull.find(t => t.id === completeTaskId)) : null;
+  const completingTaskNotes = (completingTask && activeProject?.id === completingTask.projectId) ? visibleNotes : [];
+
   // 所有任務視圖
   if (showAllTasks) {
     const PROJECT_PALETTE = [
@@ -3018,7 +3126,7 @@ function App() {
         onCancel: () => setSetDueDateTask(null)
       }),
       completeTaskId && h(CompleteTaskModal, {
-        task: tasks.find(t => t.id === completeTaskId) || allTasksFull.find(t => t.id === completeTaskId),
+        task: completingTask, notes: completingTaskNotes,
         zIndex: 700,
         onConfirm: completeTask, onCancel: () => setCompleteTaskId(null)
       }),
@@ -3205,7 +3313,8 @@ function App() {
                 style: { cursor: 'pointer', fontSize: 11, opacity: n.pinned ? 1 : 0.2, color: '#0d9488', flexShrink: 0 } }, '📌'),
               h('span', { onClick: (e) => { e.stopPropagation(); setFolderMenu({ type: 'note', id: n.id }); },
                 style: { cursor: 'pointer', fontSize: 11, opacity: 0.4, color: '#64748b', flexShrink: 0 }, title: '移到資料夾' }, '📁'),
-              ((n.imageCount || n.images?.length || 0) > 0) && h('span', { style: S.imgBadge }, `📷 ${n.imageCount || n.images?.length}`)),
+              ((n.imageCount || n.images?.length || 0) > 0) && h('span', { style: S.imgBadge }, `📷 ${n.imageCount || n.images?.length}`),
+              n.tags?.length > 0 && h('span', { style: { ...S.imgBadge, color: '#2563eb', background: '#eff6ff' } }, `🏷️ ${n.tags.length}`)),
             h('div', { style: S.notePreview }, stripHtml(n.body) || '（無內容）'),
             h('div', { style: S.noteDate }, fmt(n.updated))
           );
@@ -3434,6 +3543,9 @@ function App() {
                   uploading ? '處理中…' : '📷 加照片',
                   h('input', { type: 'file', accept: 'image/*', multiple: true, onChange: onPickImage, style: { display: 'none' } })
                 ),
+                h('button', { onClick: () => setCaseTagNote(activeNote), title: '標籤相關案件',
+                  style: { ...S.ghostBtn, color: activeNote.tags?.length ? '#2563eb' : undefined } },
+                  `🏷️ 標籤${activeNote.tags?.length ? ` (${activeNote.tags.length})` : ''}`),
 
                 confirmDel?.type === "note" && confirmDel.id === activeNote.id
                   ? h('span', { style: { display: 'flex', gap: 8 } },
@@ -3451,6 +3563,15 @@ function App() {
               ),
               h('span', { style: { ...S.sizeBar, ...(sizePct > 85 ? S.sizeBarFull : {}) } },
                 `${(noteSize / 1024).toFixed(0)} KB / 1 MB (${sizePct}%)`)
+            ),
+            activeNote.tags?.length > 0 && h('div', { className: 'no-print', style: { display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 10 } },
+              ...activeNote.tags.map(tid => {
+                const p = projects.find(x => x.id === tid);
+                if (!p) return null;
+                return h('span', { key: tid, onClick: () => setCaseTagNote(activeNote),
+                  style: { display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#2563eb', background: '#eff6ff', padding: '2px 8px', borderRadius: 10, cursor: 'pointer', border: '1px solid #dbeafe' } },
+                  `🏷️ ${p.name}`);
+              })
             ),
             h('div', null,
               h('h1', { className: 'print-only-title' }, activeNote.title || '未命名筆記'),
@@ -3814,13 +3935,18 @@ function App() {
       onSave: (ids) => updateTaskNoteLinks(linkNotesTask.id, ids),
       onCancel: () => setLinkNotesTask(null)
     }),
+    caseTagNote && h(NoteCaseTagModal, {
+      note: caseTagNote, projects,
+      onSave: (tags) => updateNoteCaseTags(caseTagNote.id, tags),
+      onCancel: () => setCaseTagNote(null)
+    }),
     setDueDateTask && h(DueDateModal, {
       task: setDueDateTask,
       onSave: (dueDate, reminderOffset, recur, recurInterval) => updateTaskDueDate(setDueDateTask.id, dueDate, reminderOffset, recur, recurInterval),
       onCancel: () => setSetDueDateTask(null)
     }),
     completeTaskId && h(CompleteTaskModal, {
-      task: tasks.find(t => t.id === completeTaskId) || allTasksFull.find(t => t.id === completeTaskId),
+      task: completingTask, notes: completingTaskNotes,
       zIndex: 700,
       onConfirm: completeTask, onCancel: () => setCompleteTaskId(null)
     }),
