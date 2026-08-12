@@ -127,7 +127,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/08/12 15:55";
+const BUILD_TIME = "2026/08/12 16:06";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1381,6 +1381,7 @@ function App() {
   const [authReady, setAuthReady] = useState(false);
   const [projects, setProjects] = useState([]);
   const [notes, setNotes] = useState([]);
+  const [crossTaggedNotes, setCrossTaggedNotes] = useState([]); // notes from other projects tagged with this project
   const [tasks, setTasks] = useState([]);
   const [allDeletedNotes, setAllDeletedNotes] = useState([]);
   const [allDeletedTasks, setAllDeletedTasks] = useState([]);
@@ -1541,6 +1542,14 @@ function App() {
       }
     }, (err) => {
       setDbError("筆記讀取被阻擋：" + err.message);
+    });
+  }, [user, activeProject]);
+
+  useEffect(() => {
+    if (!user || !activeProject) { setCrossTaggedNotes([]); return; }
+    const q = query(collection(db, `users/${user.uid}/notes`), where('tags', 'array-contains', activeProject.id));
+    return onSnapshot(q, (snap) => {
+      setCrossTaggedNotes(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(n => !n.deleted));
     });
   }, [user, activeProject]);
 
@@ -2681,6 +2690,7 @@ function App() {
   const noteTagNames = (n) => (n.tags || []).map(tid => projects.find(p => p.id === tid)?.name).filter(Boolean);
   const filtered = sortedNotes.filter((n) => !search || (n.title || '').includes(search) || stripHtml(n.body || '').includes(search) || noteTagNames(n).some(name => name.includes(search)));
   const filteredTasks = sortedTasks.filter((t) => !search || (t.title || '').includes(search) || (t.doneReason || '').includes(search));
+  const filteredCrossTagged = crossTaggedNotes.filter((n) => !search || (n.title || '').includes(search) || stripHtml(n.body || '').includes(search));
 
   const globalResults = (globalSearchOpen && globalSearchQuery.trim().length >= 1) ? (() => {
     const q = globalSearchQuery;
@@ -3319,6 +3329,20 @@ function App() {
             h('div', { style: S.notePreview }, stripHtml(n.body) || '（無內容）'),
             h('div', { style: S.noteDate }, fmt(n.updated))
           );
+          const renderCrossTaggedItem = (n) => {
+            const ownerProj = projects.find(p => p.id === n.projectId);
+            return h('div', { key: `x-${n.id}`,
+              onClick: () => openLinkedNote(n.id, n.projectId),
+              style: { ...S.noteItem, ...(activeNote?.id === n.id ? S.noteItemActive : {}) } },
+              h('div', { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 4 } },
+                h('span', { style: { fontSize: 11, flexShrink: 0 } }, '🏷️'),
+                h('span', { style: { fontWeight: 600, fontSize: 14, color: "#1f2937", flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, n.title || '未命名筆記'),
+                ownerProj && h('span', { style: { fontSize: 11, color: '#64748b', background: '#f1f5f9', padding: '1px 7px', borderRadius: 10, flexShrink: 0 } }, ownerProj.name)
+              ),
+              h('div', { style: S.notePreview }, stripHtml(n.body) || '（無內容）'),
+              h('div', { style: S.noteDate }, fmt(n.updated))
+            );
+          };
           return h('div', null,
             creatingNoteFolder && h('div', { style: { padding: '8px 14px' } },
               h(NewFolderInput, {
@@ -3329,7 +3353,7 @@ function App() {
                 onCancel: () => setCreatingNoteFolder(false)
               })
             ),
-            filtered.length === 0 && h('div', { style: S.empty }, search ? '找不到符合的筆記' : '點「新筆記」開始'),
+            filtered.length === 0 && filteredCrossTagged.length === 0 && h('div', { style: S.empty }, search ? '找不到符合的筆記' : '點「新筆記」開始'),
             ...[
               ...sortedNoteFolders.map((folder, fi) => {
                 const fns = filtered.filter(n => n.folderId === folder.id);
@@ -3364,7 +3388,12 @@ function App() {
                   !collapsed && fns.map(n => renderNoteItem(n))
                 );
               }),
-              ...filtered.filter(n => !n.folderId).map(n => renderNoteItem(n))
+              ...filtered.filter(n => !n.folderId).map(n => renderNoteItem(n)),
+              ...(filteredCrossTagged.length > 0 ? [
+                h('div', { key: 'cross-tag-header', style: { padding: '10px 14px 3px', fontSize: 11, fontWeight: 600, color: '#94a3b8', borderTop: '1px solid #f1f5f9', marginTop: 4 } },
+                  `🏷️ 標籤自其他案件 (${filteredCrossTagged.length})`),
+                ...filteredCrossTagged.map(n => renderCrossTaggedItem(n))
+              ] : [])
             ]
           );
         })(),
