@@ -127,7 +127,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/08/12 15:42";
+const BUILD_TIME = "2026/08/12 15:55";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -2688,7 +2688,7 @@ function App() {
       .filter(n => (n.title || '').includes(q) || stripHtml(n.body || '').includes(q) || noteTagNames(n).some(name => name.includes(q)))
       .map(n => ({ ...n, _type: 'note' }));
     const matchedTasks = allTasksForSearch
-      .filter(t => (t.title || '').includes(q))
+      .filter(t => (t.title || '').includes(q) || (t.doneReason || '').includes(q))
       .map(t => ({ ...t, _type: 'task' }));
     return [...matchedNotes, ...matchedTasks]
       .sort((a, b) => getSafeTime(b.updated || b.created) - getSafeTime(a.updated || a.created))
@@ -2756,6 +2756,7 @@ function App() {
                   })
                 ),
                 !isTask && snippet && h('div', { style: { fontSize: 12.5, color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, snippet),
+                isTask && item.doneReason && h('div', { style: { fontSize: 12.5, color: '#10b981', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, `✓ ${item.doneReason}`),
                 h('div', { style: { fontSize: 11, color: '#cbd5e1', marginTop: 4 } },
                   isTask ? (item.dueDate ? `截止 ${fmtDue(item.dueDate)?.text || item.dueDate}` : `建立 ${fmt(item.created)}`) : fmt(item.updated))
               );
