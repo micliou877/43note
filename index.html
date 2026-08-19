@@ -134,7 +134,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/08/12 17:12";
+const BUILD_TIME = "2026/08/19 13:58";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1116,6 +1116,114 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
   );
 }
 
+function PhotoCropper({ src, onSave, onClose }) {
+  const containerRef = useRef(null);
+  const imgElRef = useRef(null);
+  const [natural, setNatural] = useState({ w: 0, h: 0 });
+  const [rect, setRect] = useState({ x: 0.05, y: 0.05, w: 0.9, h: 0.9 });
+  const dragRef = useRef(null);
+
+  const clamp01 = (v) => Math.max(0, Math.min(1, v));
+
+  const onDrag = useCallback((e) => {
+    const drag = dragRef.current;
+    const container = containerRef.current;
+    if (!drag || !container) return;
+    e.preventDefault();
+    const t = e.touches ? e.touches[0] : e;
+    const cRect = container.getBoundingClientRect();
+    const dx = (t.clientX - drag.startX) / cRect.width;
+    const dy = (t.clientY - drag.startY) / cRect.height;
+    const s = drag.startRect;
+    const min = 0.05;
+    let { x, y, w, h } = s;
+    if (drag.mode === 'move') {
+      x = clamp01(s.x + dx); y = clamp01(s.y + dy);
+      x = Math.min(x, 1 - s.w); y = Math.min(y, 1 - s.h);
+    } else {
+      if (drag.mode.includes('e')) w = clamp01(s.x + s.w + dx) - s.x;
+      if (drag.mode.includes('s')) h = clamp01(s.y + s.h + dy) - s.y;
+      if (drag.mode.includes('w')) { const nx = clamp01(s.x + dx); w = s.x + s.w - nx; x = nx; }
+      if (drag.mode.includes('n')) { const ny = clamp01(s.y + dy); h = s.y + s.h - ny; y = ny; }
+      if (w < min) { if (drag.mode.includes('w')) x = s.x + s.w - min; w = min; }
+      if (h < min) { if (drag.mode.includes('n')) y = s.y + s.h - min; h = min; }
+    }
+    setRect({ x, y, w, h });
+  }, []);
+
+  const endDrag = useCallback(() => {
+    dragRef.current = null;
+    window.removeEventListener('mousemove', onDrag);
+    window.removeEventListener('mouseup', endDrag);
+    window.removeEventListener('touchmove', onDrag);
+    window.removeEventListener('touchend', endDrag);
+  }, [onDrag]);
+
+  useEffect(() => () => endDrag(), [endDrag]);
+
+  const beginDrag = (mode) => (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const t = e.touches ? e.touches[0] : e;
+    dragRef.current = { mode, startX: t.clientX, startY: t.clientY, startRect: { ...rect } };
+    window.addEventListener('mousemove', onDrag);
+    window.addEventListener('mouseup', endDrag);
+    window.addEventListener('touchmove', onDrag, { passive: false });
+    window.addEventListener('touchend', endDrag);
+  };
+
+  const apply = () => {
+    if (!natural.w || !natural.h || !imgElRef.current) return;
+    const sx = Math.round(rect.x * natural.w);
+    const sy = Math.round(rect.y * natural.h);
+    const sw = Math.max(1, Math.round(rect.w * natural.w));
+    const sh = Math.max(1, Math.round(rect.h * natural.h));
+    const canvas = document.createElement('canvas');
+    canvas.width = sw; canvas.height = sh;
+    canvas.getContext('2d').drawImage(imgElRef.current, sx, sy, sw, sh, 0, 0, sw, sh);
+    onSave(canvas.toDataURL('image/jpeg', JPG_QUALITY));
+  };
+
+  const handleStyle = (pos) => {
+    const base = { position: 'absolute', width: 14, height: 14, background: '#fff', border: '2px solid #0d9488', borderRadius: 3, touchAction: 'none', zIndex: 2 };
+    const map = {
+      nw: { left: -7, top: -7, cursor: 'nwse-resize' },
+      n:  { left: '50%', top: -7, marginLeft: -7, cursor: 'ns-resize' },
+      ne: { right: -7, top: -7, cursor: 'nesw-resize' },
+      e:  { right: -7, top: '50%', marginTop: -7, cursor: 'ew-resize' },
+      se: { right: -7, bottom: -7, cursor: 'nwse-resize' },
+      s:  { left: '50%', bottom: -7, marginLeft: -7, cursor: 'ns-resize' },
+      sw: { left: -7, bottom: -7, cursor: 'nesw-resize' },
+      w:  { left: -7, top: '50%', marginTop: -7, cursor: 'ew-resize' },
+    };
+    return { ...base, ...map[pos] };
+  };
+
+  return h('div', { style: { ...S.modalOverlay, padding: 0 } },
+    h('div', { style: { ...S.annotatorBox, maxWidth: '100vw', maxHeight: '100vh', width: '100vw', height: '100vh', borderRadius: 0 } },
+      h('div', { style: { background: "#0f172a", padding: "10px 14px", display: "flex", alignItems: 'center', gap: 10, flexShrink: 0 } },
+        h('span', { style: { color: '#e2e8f0', fontSize: 14, fontWeight: 600 } }, '✂ 裁切圖片'),
+        h('button', { onClick: () => setRect({ x: 0.05, y: 0.05, w: 0.9, h: 0.9 }), style: S.toolBtn, title: '重設範圍' }, '⟲'),
+        h('div', { style: { flex: 1 } }),
+        h('button', { onClick: onClose, style: S.ghostBtn }, '取消'),
+        h('button', { onClick: apply, style: S.primaryBtn }, '✓ 完成裁切')
+      ),
+      h('div', { style: { ...S.canvasWrap, flex: 1, alignItems: 'center' } },
+        h('div', { ref: containerRef, style: { position: 'relative', display: 'inline-block', maxWidth: '100%', maxHeight: '100%', overflow: 'hidden', lineHeight: 0 } },
+          h('img', { ref: imgElRef, src, draggable: false,
+            onLoad: (e) => setNatural({ w: e.target.naturalWidth, h: e.target.naturalHeight }),
+            style: { maxWidth: '100%', maxHeight: '80vh', display: 'block', userSelect: 'none' } }),
+          natural.w > 0 && h('div', {
+            onMouseDown: beginDrag('move'), onTouchStart: beginDrag('move'),
+            style: { position: 'absolute', left: `${rect.x*100}%`, top: `${rect.y*100}%`, width: `${rect.w*100}%`, height: `${rect.h*100}%`,
+              border: '2px solid #fff', boxShadow: '0 0 0 2000px rgba(0,0,0,.55)', cursor: 'move', boxSizing: 'border-box' } },
+            ...['nw','n','ne','e','se','s','sw','w'].map(pos => h('div', { key: pos, onMouseDown: beginDrag(pos), onTouchStart: beginDrag(pos), style: handleStyle(pos) }))
+          )
+        )
+      )
+    )
+  );
+}
+
 function Lightbox({ image, onClose }) {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -1246,7 +1354,7 @@ function Lightbox({ image, onClose }) {
   );
 }
 
-function ImageCard({ image, index, onAnnotate, onDelete, confirmingDelete, onConfirmDelete, onRotateLeft, onRotateRight, onView }) {
+function ImageCard({ image, index, onAnnotate, onCrop, onDelete, confirmingDelete, onConfirmDelete, onRotateLeft, onRotateRight, onView }) {
   const canvasRef = useRef(null);
   useEffect(() => {
     const img = document.createElement('img');
@@ -1302,6 +1410,7 @@ function ImageCard({ image, index, onAnnotate, onDelete, confirmingDelete, onCon
     h('canvas', { ref: canvasRef, style: { ...S.thumb, cursor: 'zoom-in' }, onClick: onView }),
     h('div', { className: 'no-print', style: S.imgActions },
       h('button', { onClick: onAnnotate, style: S.imgActBtn }, '🎨 標註'),
+      h('button', { onClick: onCrop, title: '裁切', style: S.imgActBtn }, '✂'),
       h('button', { onClick: onRotateLeft, title: '向左旋轉', style: S.imgActBtn }, '↺'),
       h('button', { onClick: onRotateRight, title: '向右旋轉', style: S.imgActBtn }, '↻'),
       h('a', { href: image.dataUrl, download: `note-${index + 1}.jpg`, style: S.imgActBtn }, '⬇'),
@@ -1395,6 +1504,7 @@ function App() {
   const [activeProject, setActiveProject] = useState(null);
   const [activeNote, setActiveNote] = useState(null);
   const [annotating, setAnnotating] = useState(null);
+  const [cropping, setCropping] = useState(null);
   const [selImg, setSelImg] = useState(null); // { imgId, src, rect } for inline image selection
   const [search, setSearch] = useState("");
   const [creatingProj, setCreatingProj] = useState(false);
@@ -2213,6 +2323,27 @@ function App() {
     }
     setAnnotating(null);
   };
+  const saveCrop = async (dataUrl) => {
+    if (!cropping) return;
+    if (cropping.type === 'inline') {
+      const img = bodyRef.current?.querySelector(`img[data-inline="${cropping.imgId}"]`);
+      if (img && dataUrl) {
+        img.src = dataUrl;
+        delete img.dataset.original;
+        img.dataset.strokes = '[]';
+        updateNoteFields({ body: bodyRef.current.innerHTML });
+        setSelImg(s => (s && s.imgId === cropping.imgId) ? { ...s, src: dataUrl, rect: img.getBoundingClientRect() } : s);
+      }
+    } else if (cropping.type === 'task') {
+      const task = tasks.find(t => t.id === cropping.id);
+      const newImages = task.images.map((im, i) => i === cropping.imgIndex ? { ...im, dataUrl, strokes: [] } : im);
+      await updateDoc(doc(db, `users/${user.uid}/tasks/${cropping.id}`), { images: newImages });
+    } else {
+      const img = noteImages[cropping.imgIndex];
+      if (img) await updateDoc(imgDoc(img.id), { dataUrl, strokes: [] });
+    }
+    setCropping(null);
+  };
   const selectInlineImg = (imgEl) => {
     document.querySelectorAll('.note-body img.img-sel').forEach(el => el.classList.remove('img-sel'));
     imgEl.classList.add('img-sel');
@@ -2225,6 +2356,16 @@ function App() {
   const deleteInlineImg = (imgId) => {
     const img = bodyRef.current?.querySelector(`img[data-inline="${imgId}"]`);
     if (img) { img.remove(); updateNoteFields({ body: bodyRef.current.innerHTML }); }
+  };
+  const rotateInlineImg = async (imgId, deg) => {
+    const img = bodyRef.current?.querySelector(`img[data-inline="${imgId}"]`);
+    if (!img) return;
+    const newSrc = await rotateImageData(img.src, deg);
+    img.src = newSrc;
+    if (img.dataset.original) img.dataset.original = await rotateImageData(img.dataset.original, deg);
+    img.dataset.strokes = '[]';
+    updateNoteFields({ body: bodyRef.current.innerHTML });
+    setSelImg(s => (s && s.imgId === imgId) ? { ...s, src: newSrc, rect: img.getBoundingClientRect() } : s);
   };
   // 自由擺放模式的圖片（.img-free）用滑鼠拖曳直接改 left/top，不影響文字排列
   const startFreeImgDrag = (e) => {
@@ -3531,6 +3672,7 @@ function App() {
                     h(ImageCard, { key: im.id, image: im, index: i,
                       onView: () => setLightbox(im),
                       onAnnotate: () => setAnnotating({ type: 'task', id: t.id, imgIndex: i }),
+                      onCrop: () => setCropping({ type: 'task', id: t.id, imgIndex: i, src: im.dataUrl }),
                       onDelete: () => setConfirmDel({ type: 'taskImage', taskId: t.id, id: i }),
                       confirmingDelete: confirmDel?.type === 'taskImage' && confirmDel.taskId === t.id && confirmDel.id === i,
                       onConfirmDelete: () => delTaskImage(t.id, i),
@@ -3902,6 +4044,7 @@ function App() {
                 h(ImageCard, { key: im.id, image: im, index: i,
                   onView: () => setLightbox(im),
                   onAnnotate: () => setAnnotating({ type: 'note', imgIndex: i }),
+                  onCrop: () => setCropping({ type: 'note', imgIndex: i, src: im.dataUrl }),
                   onDelete: () => setConfirmDel({ type: "image", id: im.id }),
                   confirmingDelete: confirmDel?.type === "image" && confirmDel.id === im.id,
                   onConfirmDelete: () => delImage(im.id),
@@ -3981,6 +4124,13 @@ function App() {
             onClick: toggleFree, title: isFree ? '取消自由擺放（回到文字排列）' : '自由擺放（可拖曳到任意位置，不受文字排列影響）'
           }, isFree ? '🔓 自由' : '📌 定位'),
           h('div', { style: { width: 1, background: '#4b5563', margin: '4px 2px', alignSelf: 'stretch' } }),
+          h('button', { style: btnStyle, title: '裁切', onClick: () => {
+            const img = bodyRef.current?.querySelector(`img[data-inline="${selImg.imgId}"]`);
+            if (img) setCropping({ type: 'inline', imgId: selImg.imgId, src: img.src });
+          } }, '✂'),
+          h('button', { style: btnStyle, title: '向左旋轉', onClick: () => rotateInlineImg(selImg.imgId, 270) }, '↺'),
+          h('button', { style: btnStyle, title: '向右旋轉', onClick: () => rotateInlineImg(selImg.imgId, 90) }, '↻'),
+          h('div', { style: { width: 1, background: '#4b5563', margin: '4px 2px', alignSelf: 'stretch' } }),
           h('button', { style: { ...btnStyle, color: '#5eead4' },
             onClick: () => {
               const img = bodyRef.current?.querySelector(`img[data-inline="${selImg.imgId}"]`);
@@ -4010,6 +4160,7 @@ function App() {
         onSave: saveAnnotation, onClose: () => setAnnotating(null)
       }) : null;
     })(),
+    cropping && h(PhotoCropper, { src: cropping.src, onSave: saveCrop, onClose: () => setCropping(null) }),
     lightbox && h(Lightbox, { image: lightbox, onClose: () => setLightbox(null) }),
     newTaskModal && h(NewTaskModal, { onConfirm: addTask, onCancel: () => setNewTaskModal(false), notes: visibleNotes }),
     linkNotesTask && h(NoteLinkModal, {
