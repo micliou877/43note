@@ -134,7 +134,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/08/25 08:26";
+const BUILD_TIME = "2026/08/25 10:11";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -3346,12 +3346,12 @@ function App() {
                   onClick: () => { if (!t.done) setEditingTask({ id: t.id, title: t.title }); }
                 }, t.title),
             t.done && t.doneReason && h('div', { style: S.taskReason }, `✓ ${t.doneReason}`),
-            t.dueDate && !t.done && (() => { const due = fmtDue(t.dueDate); return h('div', {
-              onClick: () => setSetDueDateTask(t),
-              style: { display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, color: due.color, background: due.bg, padding: '1px 7px', borderRadius: 10, marginTop: 4, cursor: 'pointer', border: `1px solid ${due.bg}` }
-            }, `📅 ${due.text}`, t.recur && h('span', { style: { marginLeft: 3, color: '#0d9488', fontWeight: 600 } }, `🔁${RECUR_LABEL[t.recur] || ''}`)); })(),
-            t.noteIds?.length > 0 && h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 } },
-              ...t.noteIds.map(nid => {
+            ((t.dueDate && !t.done) || t.noteIds?.length > 0) && h('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4, marginTop: 4 } },
+              t.dueDate && !t.done && (() => { const due = fmtDue(t.dueDate); return h('div', {
+                onClick: () => setSetDueDateTask(t),
+                style: { display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, color: due.color, background: due.bg, padding: '1px 7px', borderRadius: 10, cursor: 'pointer', border: `1px solid ${due.bg}` }
+              }, `📅 ${due.text}`, t.recur && h('span', { style: { marginLeft: 3, color: '#0d9488', fontWeight: 600 } }, `🔁${RECUR_LABEL[t.recur] || ''}`)); })(),
+              ...(t.noteIds || []).map(nid => {
                 const meta = noteTitleCache[nid];
                 if (!meta) return null;
                 return h('span', { key: nid, onClick: (e) => { e.stopPropagation(); openLinkedNote(nid, meta.projectId || t.projectId); },
@@ -3359,27 +3359,6 @@ function App() {
                   `📝 ${meta.title}`);
               })
             ),
-            editingRemark?.id === t.id
-              ? h('textarea', {
-                  autoFocus: true,
-                  value: editingRemark.value,
-                  placeholder: '備註…',
-                  rows: 2,
-                  draggable: false,
-                  onChange: (e) => setEditingRemark({ ...editingRemark, value: e.target.value }),
-                  onKeyDown: (e) => {
-                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); updateTaskRemark(editingRemark.id, editingRemark.value); }
-                    if (e.key === 'Escape') setEditingRemark(null);
-                  },
-                  onBlur: () => updateTaskRemark(editingRemark.id, editingRemark.value),
-                  onClick: e => e.stopPropagation(),
-                  style: { width: '100%', fontSize: 11.5, border: `1px solid ${palette.border}`, borderRadius: 5, padding: '3px 7px', outline: 'none', color: '#57534e', background: '#f8fafc', marginTop: 4, boxSizing: 'border-box', fontFamily: 'inherit', resize: 'vertical' }
-                })
-              : t.remark && h('div', {
-                  onClick: (e) => { e.stopPropagation(); setEditingRemark({ id: t.id, value: t.remark || '' }); },
-                  title: '點擊編輯備註',
-                  style: { fontSize: 11.5, color: '#94a3b8', marginTop: 4, cursor: 'text', wordBreak: 'break-word', whiteSpace: 'pre-wrap' }
-                }, `💬 ${t.remark}`),
             h('div', { style: S.taskMeta }, t.done ? `完成於 ${fmt(t.doneAt)}` : `建立於 ${fmt(t.created)}`)
           ),
           h('button', { onClick: e => { e.stopPropagation(); setSetDueDateTask(t); }, title: '設截止日期 / 提醒',
@@ -3391,7 +3370,28 @@ function App() {
                 h('span', { style: { color: '#ef4444', cursor: 'pointer' }, onClick: () => trashTask(t.id) }, '✓'),
                 h('span', { style: { color: '#9ca3af', cursor: 'pointer' }, onClick: () => setConfirmDel(null) }, '✕'))
             : h('span', { style: { color: '#cbd5e1', cursor: 'pointer', flexShrink: 0 }, onClick: () => setConfirmDel({ type: 'task', id: t.id }) }, '🗑')
-        )
+        ),
+        editingRemark?.id === t.id
+          ? h('textarea', {
+              autoFocus: true,
+              value: editingRemark.value,
+              placeholder: '備註…',
+              rows: 2,
+              draggable: false,
+              onChange: (e) => setEditingRemark({ ...editingRemark, value: e.target.value }),
+              onKeyDown: (e) => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); updateTaskRemark(editingRemark.id, editingRemark.value); }
+                if (e.key === 'Escape') setEditingRemark(null);
+              },
+              onBlur: () => updateTaskRemark(editingRemark.id, editingRemark.value),
+              onClick: e => e.stopPropagation(),
+              style: { width: '100%', fontSize: 11.5, border: `1px solid ${palette.border}`, borderRadius: 5, padding: '3px 7px', outline: 'none', color: '#57534e', background: '#f8fafc', marginTop: 6, boxSizing: 'border-box', fontFamily: 'inherit', resize: 'vertical' }
+            })
+          : t.remark && h('div', {
+              onClick: (e) => { e.stopPropagation(); setEditingRemark({ id: t.id, value: t.remark || '' }); },
+              title: '點擊編輯備註',
+              style: { fontSize: 11.5, color: '#94a3b8', marginTop: 6, cursor: 'text', wordBreak: 'break-word', whiteSpace: 'pre-wrap' }
+            }, `💬 ${t.remark}`)
       )
     );
     return h('div', { style: S.app },
@@ -3714,12 +3714,12 @@ function App() {
                           onClick: () => { if (!t.done) setEditingTask({ id: t.id, title: t.title }); }
                         }, t.title),
                     t.done && t.doneReason && h('div', { style: S.taskReason }, `✓ ${t.doneReason}`),
-                    t.dueDate && !t.done && (() => { const due = fmtDue(t.dueDate); return h('div', {
-                      onClick: () => setSetDueDateTask(t),
-                      style: { display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, color: due.color, background: due.bg, padding: '1px 7px', borderRadius: 10, marginTop: 4, cursor: 'pointer', border: `1px solid ${due.bg}` }
-                    }, `📅 ${due.text}`, t.recur && h('span', { style: { marginLeft: 3, color: '#0d9488', fontWeight: 600 } }, `🔁${RECUR_LABEL[t.recur] || ''}`)); })(),
-                    t.noteIds?.length > 0 && h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 } },
-                      ...t.noteIds.map(nid => {
+                    ((t.dueDate && !t.done) || t.noteIds?.length > 0) && h('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4, marginTop: 4 } },
+                      t.dueDate && !t.done && (() => { const due = fmtDue(t.dueDate); return h('div', {
+                        onClick: () => setSetDueDateTask(t),
+                        style: { display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, color: due.color, background: due.bg, padding: '1px 7px', borderRadius: 10, cursor: 'pointer', border: `1px solid ${due.bg}` }
+                      }, `📅 ${due.text}`, t.recur && h('span', { style: { marginLeft: 3, color: '#0d9488', fontWeight: 600 } }, `🔁${RECUR_LABEL[t.recur] || ''}`)); })(),
+                      ...(t.noteIds || []).map(nid => {
                         const n = notes.find(x => x.id === nid);
                         if (!n) return null;
                         return h('span', { key: nid, onClick: (e) => { e.stopPropagation(); openLinkedNote(nid, t.projectId); },
@@ -3727,27 +3727,6 @@ function App() {
                           `📝 ${n.title || '未命名筆記'}`);
                       })
                     ),
-                    editingRemark?.id === t.id
-                      ? h('textarea', {
-                          autoFocus: true,
-                          value: editingRemark.value,
-                          placeholder: '備註…',
-                          rows: 2,
-                          draggable: false,
-                          onChange: (e) => setEditingRemark({ ...editingRemark, value: e.target.value }),
-                          onKeyDown: (e) => {
-                            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); updateTaskRemark(editingRemark.id, editingRemark.value); }
-                            if (e.key === 'Escape') setEditingRemark(null);
-                          },
-                          onBlur: () => updateTaskRemark(editingRemark.id, editingRemark.value),
-                          onClick: e => e.stopPropagation(),
-                          style: { width: '100%', fontSize: 11.5, border: '1px solid #0d9488', borderRadius: 5, padding: '3px 7px', outline: 'none', color: '#57534e', background: '#f8fafc', marginTop: 4, boxSizing: 'border-box', fontFamily: 'inherit', resize: 'vertical' }
-                        })
-                      : t.remark && h('div', {
-                          onClick: (e) => { e.stopPropagation(); setEditingRemark({ id: t.id, value: t.remark || '' }); },
-                          title: '點擊編輯備註',
-                          style: { fontSize: 11.5, color: '#94a3b8', marginTop: 4, cursor: 'text', wordBreak: 'break-word', whiteSpace: 'pre-wrap' }
-                        }, `💬 ${t.remark}`),
                     h('div', { style: S.taskMeta }, t.done ? `完成於 ${fmt(t.doneAt)}` : `建立於 ${fmt(t.created)}`)
                   ),
                   h('span', { onClick: () => toggleTaskPin(t.id, t.pinned),
@@ -3769,6 +3748,27 @@ function App() {
                         h('span', { style: { color: '#9ca3af', cursor: 'pointer' }, onClick: () => setConfirmDel(null) }, '✕'))
                     : h('span', { style: { color: '#cbd5e1', cursor: 'pointer', flexShrink: 0 }, onClick: () => setConfirmDel({ type: 'task', id: t.id }) }, '🗑')
                 ),
+                editingRemark?.id === t.id
+                  ? h('textarea', {
+                      autoFocus: true,
+                      value: editingRemark.value,
+                      placeholder: '備註…',
+                      rows: 2,
+                      draggable: false,
+                      onChange: (e) => setEditingRemark({ ...editingRemark, value: e.target.value }),
+                      onKeyDown: (e) => {
+                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); updateTaskRemark(editingRemark.id, editingRemark.value); }
+                        if (e.key === 'Escape') setEditingRemark(null);
+                      },
+                      onBlur: () => updateTaskRemark(editingRemark.id, editingRemark.value),
+                      onClick: e => e.stopPropagation(),
+                      style: { width: '100%', fontSize: 11.5, border: '1px solid #0d9488', borderRadius: 5, padding: '3px 7px', outline: 'none', color: '#57534e', background: '#f8fafc', marginTop: 6, boxSizing: 'border-box', fontFamily: 'inherit', resize: 'vertical' }
+                    })
+                  : t.remark && h('div', {
+                      onClick: (e) => { e.stopPropagation(); setEditingRemark({ id: t.id, value: t.remark || '' }); },
+                      title: '點擊編輯備註',
+                      style: { fontSize: 11.5, color: '#94a3b8', marginTop: 6, cursor: 'text', wordBreak: 'break-word', whiteSpace: 'pre-wrap' }
+                    }, `💬 ${t.remark}`),
                 (t.images?.length > 0) && h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8, marginTop: 10 } },
                   ...t.images.map((im, i) =>
                     h(ImageCard, { key: im.id, image: im, index: i,
