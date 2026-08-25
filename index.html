@@ -134,7 +134,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/08/25 08:04";
+const BUILD_TIME = "2026/08/25 08:08";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -3130,7 +3130,7 @@ function App() {
           return h('div', { key: `pf-${folder.id}`, style: { background: folderBgs[fi % folderBgs.length], borderRadius: 6, marginBottom: 4, overflow: 'hidden' } },
             h('div', {
               draggable: true,
-              onDragStart: (e) => { dragId.current = folder.id; dragType.current = 'projectFolder'; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.style.opacity = '0.5'; },
+              onDragStart: (e) => { if (e.target.closest('input, textarea')) { e.preventDefault(); return; } dragId.current = folder.id; dragType.current = 'projectFolder'; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.style.opacity = '0.5'; },
               onDragEnd:   (e) => { e.currentTarget.style.opacity = '1'; dragId.current = null; },
               onDragOver:  (e) => { e.preventDefault(); if (dragType.current === 'projectFolder') e.currentTarget.style.background = '#f0fdfa'; },
               onDragLeave: (e) => { e.currentTarget.style.background = ''; },
@@ -3620,7 +3620,7 @@ function App() {
                 return h('div', { key: `nf-${folder.id}`, style: { background: folderBgs[fi % folderBgs.length], borderRadius: 6, marginBottom: 4, overflow: 'hidden' } },
                   h('div', {
                     draggable: true,
-                    onDragStart: (e) => { dragId.current = folder.id; dragType.current = 'noteFolder'; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.style.opacity = '0.5'; },
+                    onDragStart: (e) => { if (e.target.closest('input, textarea')) { e.preventDefault(); return; } dragId.current = folder.id; dragType.current = 'noteFolder'; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.style.opacity = '0.5'; },
                     onDragEnd:   (e) => { e.currentTarget.style.opacity = '1'; dragId.current = null; },
                     onDragOver:  (e) => { e.preventDefault(); if (dragType.current === 'noteFolder') e.currentTarget.style.background = '#f0fdfa'; },
                     onDragLeave: (e) => { e.currentTarget.style.background = ''; },
@@ -3670,7 +3670,7 @@ function App() {
             h('div', { key: t.id,
               id: `task-row-${t.id}`,
               draggable: tab === 'tasks',
-              onDragStart: (e) => { dragId.current = t.id; dragType.current = 'task'; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.style.opacity = '0.4'; },
+              onDragStart: (e) => { if (e.target.closest('input, textarea')) { e.preventDefault(); return; } dragId.current = t.id; dragType.current = 'task'; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.style.opacity = '0.4'; },
               onDragEnd:   (e) => { e.currentTarget.style.opacity = '1'; dragId.current = null; },
               onDragOver:  (e) => { e.preventDefault(); e.currentTarget.style.borderTop = '2px solid #0d9488'; },
               onDragLeave: (e) => { e.currentTarget.style.borderTop = ''; },
