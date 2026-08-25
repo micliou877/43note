@@ -134,7 +134,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/08/25 08:21";
+const BUILD_TIME = "2026/08/25 08:26";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -2803,7 +2803,7 @@ function App() {
                 projName && h('span', null, `📁 ${projName}`),
                 h('span', { style: { color: '#dc2626', fontWeight: 500 } }, due?.text || t.dueDate)
               ),
-              t.remark && h('div', { style: { fontSize: 11.5, color: '#78716c', marginTop: 3, wordBreak: 'break-word' } }, `💬 ${t.remark}`),
+              t.remark && h('div', { style: { fontSize: 11.5, color: '#78716c', marginTop: 3, wordBreak: 'break-word', whiteSpace: 'pre-wrap' } }, `💬 ${t.remark}`),
               t.noteIds?.length > 0 && h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 } },
                 ...t.noteIds.map(nid => {
                   const meta = noteTitleCache[nid];
@@ -3360,23 +3360,25 @@ function App() {
               })
             ),
             editingRemark?.id === t.id
-              ? h('input', {
+              ? h('textarea', {
                   autoFocus: true,
                   value: editingRemark.value,
                   placeholder: '備註…',
+                  rows: 2,
+                  draggable: false,
                   onChange: (e) => setEditingRemark({ ...editingRemark, value: e.target.value }),
                   onKeyDown: (e) => {
-                    if (e.key === 'Enter') updateTaskRemark(editingRemark.id, editingRemark.value);
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); updateTaskRemark(editingRemark.id, editingRemark.value); }
                     if (e.key === 'Escape') setEditingRemark(null);
                   },
                   onBlur: () => updateTaskRemark(editingRemark.id, editingRemark.value),
                   onClick: e => e.stopPropagation(),
-                  style: { width: '100%', fontSize: 11.5, border: `1px solid ${palette.border}`, borderRadius: 5, padding: '3px 7px', outline: 'none', color: '#57534e', background: '#f8fafc', marginTop: 4, boxSizing: 'border-box' }
+                  style: { width: '100%', fontSize: 11.5, border: `1px solid ${palette.border}`, borderRadius: 5, padding: '3px 7px', outline: 'none', color: '#57534e', background: '#f8fafc', marginTop: 4, boxSizing: 'border-box', fontFamily: 'inherit', resize: 'vertical' }
                 })
               : t.remark && h('div', {
                   onClick: (e) => { e.stopPropagation(); setEditingRemark({ id: t.id, value: t.remark || '' }); },
                   title: '點擊編輯備註',
-                  style: { fontSize: 11.5, color: '#94a3b8', marginTop: 4, cursor: 'text', wordBreak: 'break-word' }
+                  style: { fontSize: 11.5, color: '#94a3b8', marginTop: 4, cursor: 'text', wordBreak: 'break-word', whiteSpace: 'pre-wrap' }
                 }, `💬 ${t.remark}`),
             h('div', { style: S.taskMeta }, t.done ? `完成於 ${fmt(t.doneAt)}` : `建立於 ${fmt(t.created)}`)
           ),
@@ -3726,24 +3728,25 @@ function App() {
                       })
                     ),
                     editingRemark?.id === t.id
-                      ? h('input', {
+                      ? h('textarea', {
                           autoFocus: true,
                           value: editingRemark.value,
                           placeholder: '備註…',
+                          rows: 2,
                           draggable: false,
                           onChange: (e) => setEditingRemark({ ...editingRemark, value: e.target.value }),
                           onKeyDown: (e) => {
-                            if (e.key === 'Enter') updateTaskRemark(editingRemark.id, editingRemark.value);
+                            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); updateTaskRemark(editingRemark.id, editingRemark.value); }
                             if (e.key === 'Escape') setEditingRemark(null);
                           },
                           onBlur: () => updateTaskRemark(editingRemark.id, editingRemark.value),
                           onClick: e => e.stopPropagation(),
-                          style: { width: '100%', fontSize: 11.5, border: '1px solid #0d9488', borderRadius: 5, padding: '3px 7px', outline: 'none', color: '#57534e', background: '#f8fafc', marginTop: 4, boxSizing: 'border-box' }
+                          style: { width: '100%', fontSize: 11.5, border: '1px solid #0d9488', borderRadius: 5, padding: '3px 7px', outline: 'none', color: '#57534e', background: '#f8fafc', marginTop: 4, boxSizing: 'border-box', fontFamily: 'inherit', resize: 'vertical' }
                         })
                       : t.remark && h('div', {
                           onClick: (e) => { e.stopPropagation(); setEditingRemark({ id: t.id, value: t.remark || '' }); },
                           title: '點擊編輯備註',
-                          style: { fontSize: 11.5, color: '#94a3b8', marginTop: 4, cursor: 'text', wordBreak: 'break-word' }
+                          style: { fontSize: 11.5, color: '#94a3b8', marginTop: 4, cursor: 'text', wordBreak: 'break-word', whiteSpace: 'pre-wrap' }
                         }, `💬 ${t.remark}`),
                     h('div', { style: S.taskMeta }, t.done ? `完成於 ${fmt(t.doneAt)}` : `建立於 ${fmt(t.created)}`)
                   ),
