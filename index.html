@@ -134,7 +134,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/08/27 15:07";
+const BUILD_TIME = "2026/08/27 15:47";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1597,12 +1597,12 @@ function App() {
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const [allNotesForSearch, setAllNotesForSearch] = useState([]);
   const [allTasksForSearch, setAllTasksForSearch] = useState([]);
-  const [showAllTasks, setShowAllTasks] = useState(false);
+  const [showAllTasks, setShowAllTasks] = useState(true);
   const [allTasksFull, setAllTasksFull] = useState([]);
   const [allTasksFilter, setAllTasksFilter] = useState('pending');
   const [overdueModal, setOverdueModal] = useState(null);
   const [collapsedAllTaskProjects, setCollapsedAllTaskProjects] = useState(new Set());
-  const [allTasksViewMode, setAllTasksViewMode] = useState('list');
+  const [allTasksViewMode, setAllTasksViewMode] = useState('calendar');
   const [allTasksCalSelectedDate, setAllTasksCalSelectedDate] = useState(null);
   const [calOverviewNewTask, setCalOverviewNewTask] = useState(null);
 
