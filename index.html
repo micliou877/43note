@@ -134,7 +134,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/08/27 16:00";
+const BUILD_TIME = "2026/08/27 16:06";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -3137,6 +3137,25 @@ function App() {
         return cnt > 0 && h('span', { style: { marginLeft: 'auto', background: showAllTasks ? '#0d9488' : '#ef4444', color: '#fff', borderRadius: 10, padding: '1px 7px', fontSize: 11, fontWeight: 700 } }, cnt);
       })()
     ),
+    h('button', {
+      onClick: () => {
+        saveIfDirtyRef.current?.();
+        setSaveStatus('idle');
+        setShowAllTasks(true);
+        setAllTasksViewMode('calendar');
+        setMobileView('list');
+        setShowTrash(false);
+        setActiveProject(null); setActiveNote(null);
+      },
+      style: {
+        display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+        padding: '8px 12px', marginBottom: 8, borderRadius: 8, cursor: 'pointer',
+        fontSize: 13, fontWeight: (showAllTasks && allTasksViewMode === 'calendar') ? 600 : 500, border: '1px solid',
+        background: (showAllTasks && allTasksViewMode === 'calendar') ? '#f0fdfa' : '#f8fafc',
+        color: (showAllTasks && allTasksViewMode === 'calendar') ? '#0d9488' : '#374151',
+        borderColor: (showAllTasks && allTasksViewMode === 'calendar') ? '#0d9488' : '#e5e7eb',
+      }
+    }, '📅 日曆總覽'),
     !showTrash && (creatingProj
       ? h(NewProjectInput, { onConfirm: createProject, onCancel: () => setCreatingProj(false) })
       : creatingProjFolder
