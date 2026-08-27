@@ -134,7 +134,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/08/27 15:47";
+const BUILD_TIME = "2026/08/27 16:00";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -3117,11 +3117,8 @@ function App() {
       onClick: () => {
         saveIfDirtyRef.current?.();
         setSaveStatus('idle');
-        setShowAllTasks(v => {
-          const next = !v;
-          setMobileView(next ? 'list' : 'sidebar');
-          return next;
-        });
+        setShowAllTasks(true);
+        setMobileView('list');
         setShowTrash(false);
         setActiveProject(null); setActiveNote(null);
       },
