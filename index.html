@@ -83,9 +83,12 @@
   .note-body .li2 { padding-left: 2em; margin: 3px 0; }
   .note-body .li3 { padding-left: 4em; margin: 3px 0; }
   .note-body [data-toggle="1"] { position: relative; }
-  .note-body .li1[data-toggle="1"] { padding-left: 14px; }
-  .note-body [data-toggle="1"]::before { content: '▼'; position: absolute; left: 1px; top: 2px;
+  .note-body li[data-toggle="1"] { list-style: none; }
+  .note-body div[data-toggle="1"] { padding-left: 14px; }
+  .note-body [data-toggle="1"]::before { content: '▼'; position: absolute; top: 2px;
     font-size: 9px; color: #64748b; cursor: pointer; user-select: none; }
+  .note-body li[data-toggle="1"]::before { left: -1.15em; }
+  .note-body div[data-toggle="1"]::before { left: 1px; }
   .note-body [data-toggle="1"][data-collapsed="1"]::before { content: '▶'; }
   .note-body [data-li-hidden="1"] { display: none !important; }
   .note-body .page-break { display: block; text-align: center; font-size: 11px; color: #94a3b8;
@@ -148,7 +151,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/08/31 11:22";
+const BUILD_TIME = "2026/08/31 11:31";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -2254,42 +2257,73 @@ function App() {
     }
     document.execCommand('insertHTML', false, `<div class="${cls}">${prefix} </div>`);
   };
-  const liLevel = (el) => el.classList.contains('li1') ? 1 : el.classList.contains('li2') ? 2 : el.classList.contains('li3') ? 3 : 0;
-  const toggleLiCollapse = (el) => {
-    const wasCollapsed = el.dataset.collapsed === '1';
-    const level = liLevel(el);
-    let sib = el.nextElementSibling;
-    let suppressLevel = null;
-    while (sib) {
-      const sLevel = liLevel(sib);
-      if (sLevel <= level) break;
-      if (!wasCollapsed) {
-        sib.setAttribute('data-li-hidden', '1');
-      } else if (suppressLevel !== null && sLevel > suppressLevel) {
-        // 屬於巢狀已收合的子項目，維持隱藏
-      } else {
-        suppressLevel = null;
-        sib.removeAttribute('data-li-hidden');
-        if (sib.dataset.toggle === '1' && sib.dataset.collapsed === '1') suppressLevel = sLevel;
+  const liLevel = (el) => el.classList?.contains('li1') ? 1 : el.classList?.contains('li2') ? 2 : el.classList?.contains('li3') ? 3 : 0;
+  const hasNestedToggle = (el) => el.dataset?.toggle === '1' || !!el.querySelector?.('[data-toggle="1"]');
+  // 收合／展開一個已標記為可收合的項目。
+  // 兩種情況：
+  // 1) 原生項目符號／編號清單的 <li>：收合它自己 Tab 縮排出來的巢狀子清單；
+  //    如果它是清單裡最後一個項目，順便把清單結束後的後續段落也收進來。
+  // 2) 自訂大綱系統（1.大/a.小/。細，扁平的相鄰 <div>）或一般段落：
+  //    往後收合到下一個「層級較淺／也有收合按鈕／是清單」為止。
+  const toggleLiCollapse = (header) => {
+    const wasCollapsed = header.dataset.collapsed === '1';
+    const setHidden = (el, hidden) => { if (hidden) el.setAttribute('data-li-hidden', '1'); else el.removeAttribute('data-li-hidden'); };
+    if (header.tagName === 'LI') {
+      const nested = header.querySelector(':scope > ul, :scope > ol');
+      if (nested) setHidden(nested, !wasCollapsed);
+      if (!header.nextElementSibling) {
+        let topEl = header;
+        while (topEl.parentNode !== bodyRef.current) topEl = topEl.parentNode;
+        let sib = topEl.nextElementSibling;
+        while (sib) {
+          if (hasNestedToggle(sib) || sib.tagName === 'UL' || sib.tagName === 'OL') break;
+          setHidden(sib, !wasCollapsed);
+          sib = sib.nextElementSibling;
+        }
       }
-      sib = sib.nextElementSibling;
+    } else {
+      const level = liLevel(header);
+      let sib = header.nextElementSibling;
+      let suppressLevel = null;
+      while (sib) {
+        const sLevel = liLevel(sib);
+        if (level > 0) { if (sLevel === 0 || sLevel <= level) break; }
+        else if (hasNestedToggle(sib) || sib.tagName === 'UL' || sib.tagName === 'OL') break;
+        if (!wasCollapsed) {
+          setHidden(sib, true);
+        } else if (suppressLevel !== null && sLevel > suppressLevel) {
+          // 屬於巢狀已收合的子項目，維持隱藏
+        } else {
+          suppressLevel = null;
+          setHidden(sib, false);
+          if (sib.dataset?.toggle === '1' && sib.dataset?.collapsed === '1') suppressLevel = sLevel || 1;
+        }
+        sib = sib.nextElementSibling;
+      }
     }
-    if (wasCollapsed) el.removeAttribute('data-collapsed'); else el.setAttribute('data-collapsed', '1');
+    if (wasCollapsed) header.removeAttribute('data-collapsed'); else header.setAttribute('data-collapsed', '1');
     updateNoteFields({ body: bodyRef.current.innerHTML });
   };
   const toggleLiCollapsible = () => {
     const body = bodyRef.current; if (!body) return; body.focus();
     const sel = window.getSelection();
     if (!sel.rangeCount) return;
-    let n = sel.getRangeAt(0).startContainer;
-    while (n && n.parentNode !== body) n = n.parentNode;
-    if (!(n && n.nodeType === 1 && ['li1','li2','li3'].some(c => n.className?.split(' ').includes(c)))) return;
-    if (n.dataset.toggle === '1') {
-      if (n.dataset.collapsed === '1') toggleLiCollapse(n);
-      n.removeAttribute('data-toggle');
-      n.removeAttribute('data-collapsed');
+    const startNode = sel.getRangeAt(0).startContainer;
+    const startEl = startNode.nodeType === 1 ? startNode : startNode.parentElement;
+    let header = startEl?.closest ? startEl.closest('li') : null;
+    if (header && !body.contains(header)) header = null;
+    if (!header) {
+      let n = startNode;
+      while (n && n.parentNode !== body) n = n.parentNode;
+      if (n && n.nodeType === 1) header = n;
+    }
+    if (!header) return;
+    if (header.dataset.toggle === '1') {
+      if (header.dataset.collapsed === '1') toggleLiCollapse(header);
+      header.removeAttribute('data-toggle');
+      header.removeAttribute('data-collapsed');
     } else {
-      n.dataset.toggle = '1';
+      header.dataset.toggle = '1';
     }
     updateNoteFields({ body: body.innerHTML });
   };
@@ -4187,10 +4221,9 @@ function App() {
                 onMouseDown: startFreeImgDrag,
                 onClick: (e) => {
                   const t = e.target;
-                  if (t.nodeType === 1 && t.dataset && t.dataset.toggle === '1' && typeof e.offsetX === 'number' && e.offsetX < 14) {
-                    e.preventDefault();
-                    toggleLiCollapse(t);
-                    return;
+                  if (t.nodeType === 1 && t.dataset && t.dataset.toggle === '1' && typeof e.offsetX === 'number') {
+                    const hit = t.tagName === 'LI' ? (e.offsetX < 0 && e.offsetX > -22) : (e.offsetX >= 0 && e.offsetX < 14);
+                    if (hit) { e.preventDefault(); toggleLiCollapse(t); return; }
                   }
                   const img = e.target.tagName === 'IMG' && e.target.dataset.inline ? e.target : null;
                   if (img) selectInlineImg(img);
