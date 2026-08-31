@@ -82,14 +82,11 @@
   .note-body .li1 { margin: 3px 0; }
   .note-body .li2 { padding-left: 2em; margin: 3px 0; }
   .note-body .li3 { padding-left: 4em; margin: 3px 0; }
-  .note-body [data-toggle="1"] { position: relative; }
   .note-body li[data-toggle="1"] { list-style: none; }
-  .note-body div[data-toggle="1"] { padding-left: 14px; }
-  .note-body [data-toggle="1"]::before { content: '▼'; position: absolute; top: 2px;
-    font-size: 9px; color: #64748b; cursor: pointer; user-select: none; }
-  .note-body li[data-toggle="1"]::before { left: -1.15em; }
-  .note-body div[data-toggle="1"]::before { left: 1px; }
-  .note-body [data-toggle="1"][data-collapsed="1"]::before { content: '▶'; }
+  .note-body .li-toggle-mark { display: inline-block; width: 12px; margin-right: 2px; cursor: pointer;
+    user-select: none; font-size: 9px; color: #64748b; vertical-align: middle; }
+  .note-body .li-toggle-mark::before { content: '▼'; }
+  .note-body [data-collapsed="1"] > .li-toggle-mark::before { content: '▶'; }
   .note-body [data-li-hidden="1"] { display: none !important; }
   .note-body .page-break { display: block; text-align: center; font-size: 11px; color: #94a3b8;
     padding: 6px 0; margin: 10px 0; border-top: 1px dashed #cbd5e1; border-bottom: 1px dashed #cbd5e1; user-select: none; cursor: pointer; }
@@ -105,7 +102,7 @@
     main > div { overflow: visible !important; height: auto !important; flex: none !important; background: white !important; }
     .note-body { overflow: visible !important; min-height: 0 !important; max-height: none !important; border: none !important; border-radius: 0 !important; background: white !important; }
     .note-body [data-li-hidden="1"] { display: block !important; }
-    .note-body [data-toggle="1"]::before { content: '' !important; }
+    .note-body .li-toggle-mark { display: none !important; }
     .note-body img[data-inline]:hover, .note-body img[data-inline].img-sel { outline: none !important; }
     .note-body img[data-inline] { cursor: default !important; break-inside: avoid; }
     .note-body .page-break { page-break-before: always; break-before: page; border: none !important;
@@ -151,7 +148,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/08/31 11:31";
+const BUILD_TIME = "2026/08/31 11:51";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -2322,8 +2319,13 @@ function App() {
       if (header.dataset.collapsed === '1') toggleLiCollapse(header);
       header.removeAttribute('data-toggle');
       header.removeAttribute('data-collapsed');
+      header.querySelector(':scope > .li-toggle-mark')?.remove();
     } else {
       header.dataset.toggle = '1';
+      const mark = document.createElement('span');
+      mark.className = 'li-toggle-mark';
+      mark.contentEditable = 'false';
+      header.insertBefore(mark, header.firstChild);
     }
     updateNoteFields({ body: body.innerHTML });
   };
@@ -4220,10 +4222,11 @@ function App() {
                 className: 'note-body',
                 onMouseDown: startFreeImgDrag,
                 onClick: (e) => {
-                  const t = e.target;
-                  if (t.nodeType === 1 && t.dataset && t.dataset.toggle === '1' && typeof e.offsetX === 'number') {
-                    const hit = t.tagName === 'LI' ? (e.offsetX < 0 && e.offsetX > -22) : (e.offsetX >= 0 && e.offsetX < 14);
-                    if (hit) { e.preventDefault(); toggleLiCollapse(t); return; }
+                  const mark = e.target.closest?.('.li-toggle-mark');
+                  if (mark && mark.parentElement) {
+                    e.preventDefault();
+                    toggleLiCollapse(mark.parentElement);
+                    return;
                   }
                   const img = e.target.tagName === 'IMG' && e.target.dataset.inline ? e.target : null;
                   if (img) selectInlineImg(img);
