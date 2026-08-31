@@ -148,7 +148,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/08/31 11:51";
+const BUILD_TIME = "2026/08/31 12:03";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -2266,8 +2266,28 @@ function App() {
     const wasCollapsed = header.dataset.collapsed === '1';
     const setHidden = (el, hidden) => { if (hidden) el.setAttribute('data-li-hidden', '1'); else el.removeAttribute('data-li-hidden'); };
     if (header.tagName === 'LI') {
-      const nested = header.querySelector(':scope > ul, :scope > ol');
-      if (nested) setHidden(nested, !wasCollapsed);
+      // 不假設縮排是用巢狀 <ul>/<ol> 做的（瀏覽器的「縮排」指令有時是用 <blockquote>／inline margin
+      // 實作），改成：header 底下只要是「區塊層級」的直接子元素（不是文字格式化用的 span/b/i/u）
+      // 一律視為子內容收合，不管實際是用哪種標籤包起來的
+      let hadNestedBlock = false;
+      Array.from(header.children).forEach(c => {
+        if (c.classList?.contains('li-toggle-mark')) return;
+        const isBlock = ['UL','OL','DIV','P','BLOCKQUOTE','LI'].includes(c.tagName) ||
+          ['block','list-item'].includes(getComputedStyle(c).display);
+        if (isBlock) { setHidden(c, !wasCollapsed); hadNestedBlock = true; }
+      });
+      // 如果 header 底下沒有巢狀內容，可能子項目其實是「平級但縮排較深」的 <li>
+      // （縮排指令直接在每個 <li> 上加 margin/padding，而不是包成巢狀清單）
+      if (!hadNestedBlock) {
+        const headerIndent = parseFloat(getComputedStyle(header).marginLeft || 0) + parseFloat(getComputedStyle(header).paddingLeft || 0);
+        let sib = header.nextElementSibling;
+        while (sib && sib.tagName === 'LI') {
+          const sIndent = parseFloat(getComputedStyle(sib).marginLeft || 0) + parseFloat(getComputedStyle(sib).paddingLeft || 0);
+          if (sIndent <= headerIndent) break;
+          setHidden(sib, !wasCollapsed);
+          sib = sib.nextElementSibling;
+        }
+      }
       if (!header.nextElementSibling) {
         let topEl = header;
         while (topEl.parentNode !== bodyRef.current) topEl = topEl.parentNode;
