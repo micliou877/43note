@@ -51,6 +51,27 @@
     box-shadow: 0 1px 3px rgba(0,0,0,.1); z-index: 5; padding: 0;
   }
   .resize-toggle:hover { color: #0d9488; border-color: #0d9488; }
+
+  /* 任務列表：欄位變窄時圖示收合成「⋯」選單，文字保有完整寬度 */
+  .task-main-col { container-type: inline-size; }
+  .task-actions-inline { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .task-actions-collapsed { display: none; position: relative; flex-shrink: 0; }
+  .task-actions-toggle {
+    list-style: none; cursor: pointer; width: 22px; height: 22px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center; color: #94a3b8; font-size: 15px;
+  }
+  .task-actions-toggle::-webkit-details-marker { display: none; }
+  .task-actions-toggle:hover { background: #f1f5f9; color: #0d9488; }
+  .task-actions-collapsed[open] .task-actions-toggle { background: #f0fdfa; color: #0d9488; }
+  .task-actions-panel {
+    position: absolute; top: 100%; right: 0; margin-top: 4px; z-index: 20;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.14);
+    padding: 6px; display: flex; align-items: center; gap: 4px;
+  }
+  @container (max-width: 300px) {
+    .task-actions-inline { display: none !important; }
+    .task-actions-collapsed { display: inline-block !important; }
+  }
   @media (max-width: 768px) {
     .hide-on-mobile { display: none !important; }
     .mobile-full-width {
@@ -148,7 +169,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/08/31 12:03";
+const BUILD_TIME = "2026/09/01 08:00";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -524,13 +545,13 @@ function CompleteTaskModal({ task, notes, onConfirm, onCancel, zIndex }) {
   );
 }
 
-function NewTaskModal({ onConfirm, onCancel, notes, projects, defaultProjectId, fetchNotesForProject, initialDueDate }) {
+function NewTaskModal({ onConfirm, onCancel, notes, projects, defaultProjectId, fetchNotesForProject, initialDueDate, initialNoteIds }) {
   const [title, setTitle] = useState('');
   const [dueDate, setDueDate] = useState(initialDueDate || '');
   const [reminderOffset, setReminderOffset] = useState('');
   const [recur, setRecur] = useState('');
   const [recurInterval, setRecurInterval] = useState('7');
-  const [noteIds, setNoteIds] = useState([]);
+  const [noteIds, setNoteIds] = useState(initialNoteIds || []);
   const [loading, setLoading] = useState(false);
   const [isComposing, setIsComposing] = useState(false);
   const [projectId, setProjectId] = useState(defaultProjectId || (projects && projects[0]?.id) || '');
@@ -1804,6 +1825,17 @@ function App() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [globalSearchOpen]);
+
+  // 任務列表「⋯」收合選單：點外面自動關閉
+  useEffect(() => {
+    const handler = (e) => {
+      document.querySelectorAll('details.task-actions-collapsed[open]').forEach(el => {
+        if (!el.contains(e.target)) el.removeAttribute('open');
+      });
+    };
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, []);
 
   useEffect(() => {
     if (!user || !showTrash) { setAllDeletedNotes([]); setAllDeletedTasks([]); return; }
@@ -3933,9 +3965,9 @@ function App() {
                 onClick: () => { if (t.done) uncompleteTask(t.id); else setCompleteTaskId(t.id); },
                 style: { ...S.taskCheck, ...(t.done ? S.taskCheckDone : {}) }
               }, t.done ? '✓' : ''),
-              h('div', { style: { flex: 1 } },
+              h('div', { className: 'task-main-col', style: { flex: 1 } },
                 h('div', { style: { display: 'flex', alignItems: 'flex-start', gap: 6 } },
-                  h('div', { style: { flex: 1 } },
+                  h('div', { style: { flex: 1, minWidth: 0 } },
                     editingTask?.id === t.id
                       ? h('input', {
                           autoFocus: true,
@@ -3972,21 +4004,32 @@ function App() {
                   h('span', { onClick: () => toggleTaskPin(t.id, t.pinned),
                     title: t.pinned ? '取消釘選' : '釘選',
                     style: { cursor: 'pointer', fontSize: 11, opacity: t.pinned ? 1 : 0.2, color: '#0d9488', flexShrink: 0 } }, '📌'),
-                  h('button', { onClick: e => { e.stopPropagation(); setSetDueDateTask(t); }, title: '設截止日期 / 提醒',
-                    style: { ...S.imgActBtn, margin: 0, flexShrink: 0, fontSize: 13, padding: '5px 7px' } }, '📅'),
-                  h('button', { onClick: e => { e.stopPropagation(); setLinkNotesTask(t); }, title: '標記相關筆記',
-                    style: { ...S.imgActBtn, margin: 0, flexShrink: 0, fontSize: 13, padding: '5px 7px', color: t.noteIds?.length ? '#2563eb' : undefined } }, '🔗'),
-                  h('button', { onClick: e => { e.stopPropagation(); setEditingRemark({ id: t.id, value: t.remark || '' }); }, title: '加備註',
-                    style: { ...S.imgActBtn, margin: 0, flexShrink: 0, fontSize: 13, padding: '5px 7px', color: t.remark ? '#0d9488' : undefined } }, '💬'),
-                  h('label', { style: { ...S.imgActBtn, cursor: 'pointer', flexShrink: 0, margin: 0 }, title: '加照片' },
-                    '📷',
-                    h('input', { type: 'file', accept: 'image/*', multiple: true, onChange: (e) => onPickTaskImage(t.id, e), style: { display: 'none' } })
-                  ),
-                  confirmDel?.type === 'task' && confirmDel.id === t.id
-                    ? h('span', { style: { display: 'flex', gap: 4, flexShrink: 0 } },
-                        h('span', { style: { color: '#ef4444', cursor: 'pointer' }, onClick: () => trashTask(t.id) }, '✓'),
-                        h('span', { style: { color: '#9ca3af', cursor: 'pointer' }, onClick: () => setConfirmDel(null) }, '✕'))
-                    : h('span', { style: { color: '#cbd5e1', cursor: 'pointer', flexShrink: 0 }, onClick: () => setConfirmDel({ type: 'task', id: t.id }) }, '🗑')
+                  (() => {
+                    const actionBtns = (suffix) => [
+                      h('button', { key: `cal-${suffix}`, onClick: e => { e.stopPropagation(); setSetDueDateTask(t); }, title: '設截止日期 / 提醒',
+                        style: { ...S.imgActBtn, margin: 0, flexShrink: 0, fontSize: 13, padding: '5px 7px' } }, '📅'),
+                      h('button', { key: `link-${suffix}`, onClick: e => { e.stopPropagation(); setLinkNotesTask(t); }, title: '標記相關筆記',
+                        style: { ...S.imgActBtn, margin: 0, flexShrink: 0, fontSize: 13, padding: '5px 7px', color: t.noteIds?.length ? '#2563eb' : undefined } }, '🔗'),
+                      h('button', { key: `remark-${suffix}`, onClick: e => { e.stopPropagation(); setEditingRemark({ id: t.id, value: t.remark || '' }); }, title: '加備註',
+                        style: { ...S.imgActBtn, margin: 0, flexShrink: 0, fontSize: 13, padding: '5px 7px', color: t.remark ? '#0d9488' : undefined } }, '💬'),
+                      h('label', { key: `photo-${suffix}`, style: { ...S.imgActBtn, cursor: 'pointer', flexShrink: 0, margin: 0 }, title: '加照片' },
+                        '📷',
+                        h('input', { type: 'file', accept: 'image/*', multiple: true, onChange: (e) => onPickTaskImage(t.id, e), style: { display: 'none' } })
+                      ),
+                      confirmDel?.type === 'task' && confirmDel.id === t.id
+                        ? h('span', { key: `del-${suffix}`, style: { display: 'flex', gap: 4, flexShrink: 0 } },
+                            h('span', { style: { color: '#ef4444', cursor: 'pointer' }, onClick: () => trashTask(t.id) }, '✓'),
+                            h('span', { style: { color: '#9ca3af', cursor: 'pointer' }, onClick: () => setConfirmDel(null) }, '✕'))
+                        : h('span', { key: `del-${suffix}`, style: { color: '#cbd5e1', cursor: 'pointer', flexShrink: 0 }, onClick: () => setConfirmDel({ type: 'task', id: t.id }) }, '🗑')
+                    ];
+                    return h(React.Fragment, { key: 'actions' },
+                      h('div', { className: 'task-actions-inline' }, ...actionBtns('inline')),
+                      h('details', { className: 'task-actions-collapsed' },
+                        h('summary', { className: 'task-actions-toggle', title: '更多操作', onClick: e => e.stopPropagation() }, '⋯'),
+                        h('div', { className: 'task-actions-panel', onClick: e => e.stopPropagation() }, ...actionBtns('panel'))
+                      )
+                    );
+                  })()
                 ),
                 editingRemark?.id === t.id
                   ? h('textarea', {
@@ -4029,8 +4072,13 @@ function App() {
         tab === 'calendar' && h('div', null,
           h(CalendarView, { tasks: visibleTasks, selectedDate: calSelectedDate, onSelectDate: setCalSelectedDate }),
           calSelectedDate && h('div', null,
-            h('div', { style: { padding: '8px 14px 4px', borderTop: '1px solid #f1f5f9', fontSize: 13, fontWeight: 600, color: '#0f172a' } },
-              `${calSelectedDate.getMonth()+1} 月 ${calSelectedDate.getDate()} 日 的任務`),
+            h('div', { style: { padding: '8px 14px 4px', borderTop: '1px solid #f1f5f9', fontSize: 13, fontWeight: 600, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 8 } },
+              h('span', null, `${calSelectedDate.getMonth()+1} 月 ${calSelectedDate.getDate()} 日 的任務`),
+              h('button', {
+                onClick: () => setNewTaskModal({ dueDate: toLocalDTStr(new Date(calSelectedDate.getFullYear(), calSelectedDate.getMonth(), calSelectedDate.getDate(), 9, 0)) }),
+                style: { fontSize: 11, color: '#0d9488', background: '#f0fdfa', border: '1px solid #0d9488', borderRadius: 6, cursor: 'pointer', padding: '2px 8px' }
+              }, '+ 這天新增')
+            ),
             (() => {
               const seenIds = new Set();
               const dayTasks = [];
@@ -4113,6 +4161,8 @@ function App() {
                 h('button', { onClick: () => setCaseTagNote(activeNote), title: '標籤相關案件',
                   style: { ...S.ghostBtn, color: activeNote.tags?.length ? '#2563eb' : undefined } },
                   `🏷️ 標籤${activeNote.tags?.length ? ` (${activeNote.tags.length})` : ''}`),
+                h('button', { onClick: () => setNewTaskModal({ noteIds: [activeNote.id] }), title: '從這則筆記建立任務',
+                  style: S.ghostBtn }, '✅ 加任務'),
 
                 confirmDel?.type === "note" && confirmDel.id === activeNote.id
                   ? h('span', { style: { display: 'flex', gap: 8 } },
@@ -4533,7 +4583,7 @@ function App() {
     })(),
     cropping && h(PhotoCropper, { src: cropping.src, onSave: saveCrop, onClose: () => setCropping(null) }),
     lightbox && h(Lightbox, { image: lightbox, onClose: () => setLightbox(null) }),
-    newTaskModal && h(NewTaskModal, { onConfirm: addTask, onCancel: () => setNewTaskModal(false), notes: visibleNotes }),
+    newTaskModal && h(NewTaskModal, { onConfirm: addTask, onCancel: () => setNewTaskModal(false), notes: visibleNotes, initialDueDate: newTaskModal.dueDate || '', initialNoteIds: newTaskModal.noteIds || [] }),
     linkNotesTask && h(NoteLinkModal, {
       notes: visibleNotes,
       selectedIds: linkNotesTask.noteIds || [],
