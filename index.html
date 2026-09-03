@@ -169,7 +169,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/09/01 08:00";
+const BUILD_TIME = "2026/09/03 15:43";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1620,6 +1620,7 @@ function App() {
   const bodyUndoStack      = useRef([]);
   const bodyUndoLastPush   = useRef(0);
   const bodyRef            = useRef(null);
+  const savedSelRangeRef   = useRef(null);
   const selBreakRef        = useRef(null);
   const overdueAlertShownRef = useRef(false);
   const [canBodyUndo, setCanBodyUndo] = useState(false);
@@ -1663,7 +1664,21 @@ function App() {
     bodyUndoLastPush.current = 0;
     setCanBodyUndo(false);
     selBreakRef.current = null;
-    if (bodyRef.current) bodyRef.current.innerHTML = toBodyHtml(activeNote?.body || '');
+    if (bodyRef.current) {
+      bodyRef.current.innerHTML = toBodyHtml(activeNote?.body || '');
+      // 舊筆記的自由擺放圖片（.img-free）可能還是用 px 記錄 left/top/width。
+      // 列印時側欄會隱藏、note-body 寬度跟編輯時不同、文字也會重新換行，
+      // px 位置在列印版面會整個跑掉，所以載入時偵測到就轉成相對百分比並存回去。
+      const body = bodyRef.current;
+      const bw = body.clientWidth || 1, bh = body.offsetHeight || 1;
+      let migrated = false;
+      body.querySelectorAll('img[data-inline].img-free').forEach(img => {
+        if (img.style.left && img.style.left.endsWith('px')) { img.style.left = (parseFloat(img.style.left) / bw * 100) + '%'; migrated = true; }
+        if (img.style.top && img.style.top.endsWith('px')) { img.style.top = (parseFloat(img.style.top) / bh * 100) + '%'; migrated = true; }
+        if (img.style.width && img.style.width.endsWith('px')) { img.style.width = (parseFloat(img.style.width) / bw * 100) + '%'; migrated = true; }
+      });
+      if (migrated) updateNoteFields({ body: body.innerHTML });
+    }
   }, [activeNote?.id]);
 
   // 訂閱目前筆記的圖片 subcollection
@@ -2385,7 +2400,12 @@ function App() {
     const body = bodyRef.current; if (!body) return; body.focus();
     document.execCommand('insertHTML', false, '<div class="page-break" contenteditable="false">✂ 分頁（列印/匯出PDF會從這裡換頁）</div><div><br></div>');
   };
-  const applyHighlight = (color) => {
+  // 對選取範圍逐一套用 perRangeFn（回傳處理後的節點，供最後定位游標用）。
+  // 每一行在 note-body 底下都是獨立的 <div>（Chrome contenteditable 換行機制），
+  // 選取範圍若跨越多行，不能把整段（含多個 block <div>）塞進單一 inline <span>，
+  // 否則會產生 <span><div>…</div><div>…</div></span> 這種不合法巢狀，導致格式套用失效。
+  // 因此跨行時改成逐行各自處理。
+  const applyInlineRangeOp = (perRangeFn) => {
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) { bodyRef.current?.focus(); return; }
     const body = bodyRef.current;
@@ -2397,10 +2417,51 @@ function App() {
       bodyUndoLastPush.current = now;
       setCanBodyUndo(true);
     }
-    // extractContents + span：直接包住選取內容為行內 <span>，
-    // 完全避開 execCommand('hiliteColor') 把背景色套到整個 block 的瀏覽器 bug
-    const wrapRange = (r) => {
+    const lineOf = (node) => {
+      let n = node.nodeType === Node.TEXT_NODE ? node.parentNode : node;
+      while (n && n !== body) {
+        if (n.parentNode === body) return n;
+        n = n.parentNode;
+      }
+      return null;
+    };
+    const startLine = lineOf(range.startContainer);
+    const endLine = lineOf(range.endContainer);
+    let lastNode = null;
+    if (!startLine || !endLine || startLine === endLine) {
+      lastNode = perRangeFn(range);
+    } else {
+      const lines = [];
+      let n = startLine, guard = 0;
+      while (n && guard++ < 2000) { lines.push(n); if (n === endLine) break; n = n.nextSibling; }
+      if (lines[lines.length - 1] !== endLine) {
+        // 找不到 startLine -> endLine 的兄弟節點路徑（例如跨越清單），退回原本單一 range 處理
+        lastNode = perRangeFn(range);
+      } else {
+        lines.forEach((lineEl, i) => {
+          const r = document.createRange();
+          if (i === 0 && i === lines.length - 1) { r.setStart(range.startContainer, range.startOffset); r.setEnd(range.endContainer, range.endOffset); }
+          else if (i === 0) { r.setStart(range.startContainer, range.startOffset); r.setEnd(lineEl, lineEl.childNodes.length); }
+          else if (i === lines.length - 1) { r.setStart(lineEl, 0); r.setEnd(range.endContainer, range.endOffset); }
+          else { r.selectNodeContents(lineEl); }
+          const node = perRangeFn(r);
+          if (node) lastNode = node;
+        });
+      }
+    }
+    const r2 = document.createRange();
+    if (lastNode) { r2.setStartAfter(lastNode); r2.collapse(true); }
+    else { r2.selectNodeContents(body); r2.collapse(false); }
+    sel.removeAllRanges();
+    sel.addRange(r2);
+    updateNoteFields({ body: body?.innerHTML || '' });
+    body?.focus();
+  };
+  const applyHighlight = (color) => {
+    applyInlineRangeOp((r) => {
       if (r.collapsed) return null;
+      // extractContents + span：直接包住選取內容為行內 <span>，
+      // 完全避開 execCommand('hiliteColor') 把背景色套到整個 block 的瀏覽器 bug
       const frag = r.extractContents();
       // 選取範圍內若已有舊的螢光色（例如先前上過紅色），先清掉舊的
       // background-color，否則巢狀在裡面的舊 <span> 仍會蓋掉外層新顏色，
@@ -2416,50 +2477,22 @@ function App() {
       span.appendChild(frag);
       r.insertNode(span);
       return span;
-    };
-    // 每一行在 note-body 底下都是獨立的 <div>（Chrome contenteditable 換行機制），
-    // 選取範圍若跨越多行，不能把整段（含多個 block <div>）塞進單一 inline <span>，
-    // 否則會產生 <span><div>…</div><div>…</div></span> 這種不合法巢狀，導致螢光筆失效。
-    // 因此跨行時改成逐行各自包一個 <span>。
-    const lineOf = (node) => {
-      let n = node.nodeType === Node.TEXT_NODE ? node.parentNode : node;
-      while (n && n !== body) {
-        if (n.parentNode === body) return n;
-        n = n.parentNode;
-      }
-      return null;
-    };
-    const startLine = lineOf(range.startContainer);
-    const endLine = lineOf(range.endContainer);
-    let lastSpan = null;
-    if (!startLine || !endLine || startLine === endLine) {
-      lastSpan = wrapRange(range);
-    } else {
-      const lines = [];
-      let n = startLine, guard = 0;
-      while (n && guard++ < 2000) { lines.push(n); if (n === endLine) break; n = n.nextSibling; }
-      if (lines[lines.length - 1] !== endLine) {
-        // 找不到 startLine -> endLine 的兄弟節點路徑（例如跨越清單），退回原本單一 span 包法
-        lastSpan = wrapRange(range);
-      } else {
-        lines.forEach((lineEl, i) => {
-          const r = document.createRange();
-          if (i === 0 && i === lines.length - 1) { r.setStart(range.startContainer, range.startOffset); r.setEnd(range.endContainer, range.endOffset); }
-          else if (i === 0) { r.setStart(range.startContainer, range.startOffset); r.setEnd(lineEl, lineEl.childNodes.length); }
-          else if (i === lines.length - 1) { r.setStart(lineEl, 0); r.setEnd(range.endContainer, range.endOffset); }
-          else { r.selectNodeContents(lineEl); }
-          const span = wrapRange(r);
-          if (span) lastSpan = span;
-        });
-      }
-    }
-    const r2 = document.createRange();
-    if (lastSpan) { r2.setStartAfter(lastSpan); r2.collapse(true); }
-    else { r2.selectNodeContents(body); r2.collapse(false); }
-    sel.removeAllRanges();
-    sel.addRange(r2);
-    updateNoteFields({ body: body?.innerHTML || '' });
-    body?.focus();
+    });
+  };
+  const removeHighlight = () => {
+    applyInlineRangeOp((r) => {
+      if (r.collapsed) return null;
+      const frag = r.extractContents();
+      frag.querySelectorAll('[style]').forEach(el => {
+        if (el.style.backgroundColor) {
+          el.style.removeProperty('background-color');
+          if (!el.style.cssText.trim()) el.removeAttribute('style');
+        }
+      });
+      const lastNode = frag.lastChild;
+      r.insertNode(frag);
+      return lastNode;
+    });
   };
   const trashNote = async (id) => {
     await updateDoc(doc(db, `users/${user.uid}/notes/${id}`), { deleted: true, deletedAt: serverTimestamp() });
@@ -2554,20 +2587,26 @@ function App() {
     updateNoteFields({ body: bodyRef.current.innerHTML });
     setSelImg(s => (s && s.imgId === imgId) ? { ...s, src: newSrc, rect: img.getBoundingClientRect() } : s);
   };
-  // 自由擺放模式的圖片（.img-free）用滑鼠拖曳直接改 left/top，不影響文字排列
+  // 自由擺放模式的圖片（.img-free）用滑鼠拖曳直接改 left/top，不影響文字排列。
+  // left/top/width 一律存成「相對於 note-body 容器」的百分比而非固定 px──
+  // 因為列印時側欄會被隱藏、note-body 的實際寬度跟編輯時不同，文字也會重新換行，
+  // 用 px 記錄的位置在列印版面裡會整個跑掉；用百分比才能讓圖片跟著容器縮放，位置維持相對一致。
   const startFreeImgDrag = (e) => {
     const img = e.target.tagName === 'IMG' && e.target.dataset.inline ? e.target : null;
     if (!img || !img.classList.contains('img-free')) return;
     e.preventDefault();
     selectInlineImg(img);
+    const body = bodyRef.current;
+    const bw = body?.clientWidth || 1;
+    const bh = body?.offsetHeight || 1;
     const startLeft = parseFloat(img.style.left) || 0;
     const startTop = parseFloat(img.style.top) || 0;
     const startX = e.clientX, startY = e.clientY;
     let moved = false;
     const onMove = (ev) => {
       moved = true;
-      img.style.left = Math.max(0, startLeft + (ev.clientX - startX)) + 'px';
-      img.style.top = Math.max(0, startTop + (ev.clientY - startY)) + 'px';
+      img.style.left = Math.max(0, startLeft + (ev.clientX - startX) / bw * 100) + '%';
+      img.style.top = Math.max(0, startTop + (ev.clientY - startY) / bh * 100) + '%';
       setSelImg(s => (s && s.imgId === img.dataset.inline) ? { ...s, rect: img.getBoundingClientRect() } : s);
     };
     const onUp = () => {
@@ -2582,8 +2621,9 @@ function App() {
     e.preventDefault(); e.stopPropagation();
     const img = bodyRef.current?.querySelector(`img[data-inline="${selImg?.imgId}"]`);
     if (!img) return;
+    const bw = bodyRef.current?.clientWidth || 1;
     const startX = e.clientX, startW = img.getBoundingClientRect().width;
-    const onMove = (e) => { img.style.width = Math.max(60, startW + e.clientX - startX) + 'px'; };
+    const onMove = (e) => { img.style.width = Math.max(60, startW + e.clientX - startX) / bw * 100 + '%'; };
     const onUp = () => {
       updateNoteFields({ body: bodyRef.current.innerHTML });
       setSelImg(s => s ? { ...s, rect: img.getBoundingClientRect() } : s);
@@ -4141,8 +4181,9 @@ function App() {
             h('button', { className: 'mobile-only', onClick: () => setMobileView('list'), style: { position: 'absolute', top: 20, left: 20, background: 'none', border: 'none', fontSize: 32, padding: '0 10px', cursor: 'pointer', color: '#64748b' } }, '‹'),
             h('div', { style: { fontSize: 48 } }, '📝'), h('p', null, '選擇左側筆記，或建立新筆記'))
         : h('div', { style: S.editor },
+            h('div', { className: 'no-print', style: { position: 'sticky', top: 0, zIndex: 10, background: '#f8fafc', paddingBottom: 4, boxShadow: '0 2px 4px rgba(0,0,0,0.06)' } },
             // 👇 這是優化防擠壓，且使用原生 Label 的工具列
-            h('div', { className: 'no-print', style: { display: 'flex', flexDirection: 'column', gap: 12, paddingBottom: 16, marginBottom: 12, borderBottom: '1px solid #f1f5f9' } },
+            h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12, paddingBottom: 16, marginBottom: 12, borderBottom: '1px solid #f1f5f9' } },
               h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, width: '100%' } },
                 h('button', { className: 'mobile-only', onClick: () => setMobileView('list'), style: { background: 'none', border: 'none', fontSize: 28, padding: '0 8px 0 0', cursor: 'pointer', color: '#64748b' } }, '‹'),
                 h('input', { value: activeNote.title || '', onChange: (e) => updateNoteFields({ title: e.target.value }), placeholder: '筆記標題', style: { ...S.titleInput, width: '100%', minWidth: 0 } })
@@ -4190,9 +4231,7 @@ function App() {
                   `🏷️ ${p.name}`);
               })
             ),
-            h('div', null,
-              h('h1', { className: 'print-only-title' }, activeNote.title || '未命名筆記'),
-              h('div', { className: 'no-print', style: { ...S.fmtBar, justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 10, boxShadow: '0 2px 4px rgba(0,0,0,0.06)' } },
+              h('div', { className: 'no-print', style: { ...S.fmtBar, justifyContent: 'space-between' } },
                 h('div', { style: { display: 'flex', gap: 3, alignItems: 'center', flexWrap: 'wrap' } },
                   h('button', { onMouseDown: (e) => { e.preventDefault(); document.execCommand('bold'); bodyRef.current?.focus(); },
                     style: { ...S.fmtBtn, fontWeight: 700 }, title: '粗體 (Ctrl+B)' }, 'B'),
@@ -4203,9 +4242,40 @@ function App() {
                   h('button', { onMouseDown: (e) => { e.preventDefault(); document.execCommand('strikeThrough'); bodyRef.current?.focus(); },
                     style: { ...S.fmtBtn, textDecoration: 'line-through', fontSize: 12 }, title: '刪除線' }, 'S'),
                   h('div', { style: S.fmtDivider }),
-                  h('button', { onMouseDown: (e) => { e.preventDefault(); const n = Math.max(10, inlineFontSize - 2); setInlineFontSize(n); applyInlineFontSize(n); }, style: { ...S.fmtBtn, fontWeight: 600 }, title: '縮小選取文字' }, 'A-'),
-                  h('span', { style: { fontSize: 11, color: '#94a3b8', minWidth: 30, textAlign: 'center', userSelect: 'none', lineHeight: '26px' } }, `${inlineFontSize}px`),
-                  h('button', { onMouseDown: (e) => { e.preventDefault(); const n = Math.min(48, inlineFontSize + 2); setInlineFontSize(n); applyInlineFontSize(n); }, style: { ...S.fmtBtn, fontWeight: 600 }, title: '放大選取文字' }, 'A+'),
+                  h('button', { onMouseDown: (e) => { e.preventDefault(); const n = Math.max(8, inlineFontSize - 2); setInlineFontSize(n); applyInlineFontSize(n); }, style: { ...S.fmtBtn, fontWeight: 600 }, title: '縮小選取文字' }, 'A-'),
+                  h('input', {
+                    type: 'number',
+                    min: 8, max: 96,
+                    value: inlineFontSize,
+                    list: 'note-font-size-options',
+                    onMouseDown: (e) => {
+                      const sel = window.getSelection();
+                      if (sel && sel.rangeCount > 0 && bodyRef.current && bodyRef.current.contains(sel.anchorNode)) {
+                        savedSelRangeRef.current = sel.getRangeAt(0).cloneRange();
+                      }
+                    },
+                    onChange: (e) => {
+                      const n = parseInt(e.target.value, 10);
+                      if (!Number.isNaN(n)) setInlineFontSize(n);
+                    },
+                    onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } },
+                    onBlur: (e) => {
+                      const n = Math.max(8, Math.min(96, parseInt(e.target.value, 10) || inlineFontSize));
+                      setInlineFontSize(n);
+                      if (savedSelRangeRef.current) {
+                        const sel = window.getSelection();
+                        sel.removeAllRanges();
+                        sel.addRange(savedSelRangeRef.current);
+                      }
+                      applyInlineFontSize(n);
+                    },
+                    title: '選取文字後，在此直接輸入字級（px）',
+                    style: { width: 42, fontSize: 12, color: '#374151', height: 24, borderRadius: 5, border: '1px solid #d1d5db', background: '#fff', padding: '0 3px', textAlign: 'center' }
+                  }),
+                  h('datalist', { id: 'note-font-size-options' },
+                    [10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48].map(sz => h('option', { key: sz, value: sz }))
+                  ),
+                  h('button', { onMouseDown: (e) => { e.preventDefault(); const n = Math.min(96, inlineFontSize + 2); setInlineFontSize(n); applyInlineFontSize(n); }, style: { ...S.fmtBtn, fontWeight: 600 }, title: '放大選取文字' }, 'A+'),
                   h('div', { style: S.fmtDivider }),
                   h('span', { style: { fontSize: 11, color: '#94a3b8', userSelect: 'none' } }, '顏色'),
                   ...['#111827','#6b7280','#dc2626','#d97706','#059669','#2563eb','#7c3aed','#db2777'].map(c =>
@@ -4222,6 +4292,9 @@ function App() {
                       title: `螢光標記（${label}）`,
                       style: { width: 16, height: 16, borderRadius: 4, background: c, border: '1px solid rgba(0,0,0,0.15)', cursor: 'pointer', padding: 0, flexShrink: 0 } })
                   ),
+                  h('button', { onMouseDown: (e) => { e.preventDefault(); removeHighlight(); },
+                    title: '取消螢光筆',
+                    style: { ...S.fmtBtn, width: 16, height: 16, minWidth: 16, padding: 0, borderRadius: 4, background: '#fff', border: '1px solid rgba(0,0,0,0.15)', fontSize: 10, lineHeight: '14px', color: '#94a3b8' } }, '✕'),
                   h('div', { style: S.fmtDivider }),
                   h('button', { onMouseDown: (e) => { e.preventDefault(); document.execCommand('indent'); bodyRef.current?.focus(); },
                     style: S.fmtBtn, title: 'TAB 縮排' }, '⇥ 縮'),
@@ -4284,7 +4357,9 @@ function App() {
                     style: { ...S.fmtBtn, color: focusMode ? '#0d9488' : '#94a3b8', fontSize: 15 } }, focusMode ? '⤢ 離開全螢幕' : '⛶ 全螢幕')
                 )
               ),
-              h('div', {
+            ),
+            h('h1', { className: 'print-only-title' }, activeNote.title || '未命名筆記'),
+            h('div', {
                 ref: bodyRef,
                 contentEditable: true,
                 suppressContentEditableWarning: true,
@@ -4458,8 +4533,7 @@ function App() {
                 },
                 style: { ...S.bodyArea, borderRadius: '0 0 10px 10px', borderTop: 'none',
                   minHeight: bodyExpanded ? 'calc(100vh - 340px)' : 150, overflow: 'auto', resize: 'none' }
-              })
-            ),
+              }),
             (noteImages.length > 0) && h('div', { style: S.imgGrid },
               ...noteImages.map((im, i) =>
                 h(ImageCard, { key: im.id, image: im, index: i,
@@ -4516,8 +4590,9 @@ function App() {
           img.style.float = '';
           const bRect = body.getBoundingClientRect();
           const iRect = img.getBoundingClientRect();
-          img.style.left = (iRect.left - bRect.left + body.scrollLeft) + 'px';
-          img.style.top = (iRect.top - bRect.top + body.scrollTop) + 'px';
+          const bw = body.clientWidth || 1, bh = body.offsetHeight || 1;
+          img.style.left = ((iRect.left - bRect.left + body.scrollLeft) / bw * 100) + '%';
+          img.style.top = ((iRect.top - bRect.top + body.scrollTop) / bh * 100) + '%';
           img.classList.add('img-free');
           img.draggable = false;
         }
