@@ -112,6 +112,11 @@
   .note-body .page-break { display: block; text-align: center; font-size: 11px; color: #94a3b8;
     padding: 6px 0; margin: 10px 0; border-top: 1px dashed #cbd5e1; border-bottom: 1px dashed #cbd5e1; user-select: none; cursor: pointer; }
   .note-body .page-break.break-sel { background: #fee2e2; border-color: #ef4444; color: #ef4444; }
+  /* 字級輸入框：拿掉瀏覽器原生的上下微調箭頭，不然跟 datalist 下拉圖示擠在一起，
+     窄欄位裡數字會被擠到看不見（已經有 A- / A+ 按鈕可以微調了，不需要原生箭頭）。 */
+  .note-fontsize-input::-webkit-inner-spin-button,
+  .note-fontsize-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  .note-fontsize-input { -moz-appearance: textfield; }
   .print-only-title { display: none; }
   @media print {
     aside, section, .resize-handle, .no-print { display: none !important; }
@@ -169,7 +174,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/09/03 15:43";
+const BUILD_TIME = "2026/09/03 16:01";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -2061,7 +2066,19 @@ function App() {
   const exportToPDF = () => {
     const prev = document.title;
     document.title = activeNote?.title || '未命名筆記';
-    window.addEventListener('afterprint', () => { document.title = prev; }, { once: true });
+    // 自由擺放圖片（.img-free）是 position:absolute，脫離文件流，位置永遠是相對整份
+    // 筆記「連續版面」算出來的。手動分頁點會讓瀏覽器在該處插入一段留白換到下一頁，
+    // 但這段留白不會反映在絕對定位圖片的座標裡，所以列印/匯出 PDF 時圖片常常跟丟、
+    // 跑到不對的那一頁。這裡的做法：列印前先暫時拿掉 img-free class，讓圖片退回一般
+    // 文件流內的圖片（跟著它原本在 HTML 裡的位置正常分頁），列印完再加回來，
+    // 讓編輯畫面看到的自由擺放效果不受影響。
+    const body = bodyRef.current;
+    const freeImgs = body ? Array.from(body.querySelectorAll('img[data-inline].img-free')) : [];
+    freeImgs.forEach(img => img.classList.remove('img-free'));
+    window.addEventListener('afterprint', () => {
+      document.title = prev;
+      freeImgs.forEach(img => img.classList.add('img-free'));
+    }, { once: true });
     window.print();
   };
 
@@ -4245,6 +4262,7 @@ function App() {
                   h('button', { onMouseDown: (e) => { e.preventDefault(); const n = Math.max(8, inlineFontSize - 2); setInlineFontSize(n); applyInlineFontSize(n); }, style: { ...S.fmtBtn, fontWeight: 600 }, title: '縮小選取文字' }, 'A-'),
                   h('input', {
                     type: 'number',
+                    className: 'note-fontsize-input',
                     min: 8, max: 96,
                     value: inlineFontSize,
                     list: 'note-font-size-options',
@@ -4270,7 +4288,7 @@ function App() {
                       applyInlineFontSize(n);
                     },
                     title: '選取文字後，在此直接輸入字級（px）',
-                    style: { width: 42, fontSize: 12, color: '#374151', height: 24, borderRadius: 5, border: '1px solid #d1d5db', background: '#fff', padding: '0 3px', textAlign: 'center' }
+                    style: { width: 40, fontSize: 12, color: '#374151', height: 24, borderRadius: 5, border: '1px solid #d1d5db', background: '#fff', padding: '0', textAlign: 'center' }
                   }),
                   h('datalist', { id: 'note-font-size-options' },
                     [10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48].map(sz => h('option', { key: sz, value: sz }))
