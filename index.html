@@ -174,7 +174,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/09/03 16:01";
+const BUILD_TIME = "2026/09/07 11:36";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -2329,7 +2329,11 @@ function App() {
   const toggleLiCollapse = (header) => {
     const wasCollapsed = header.dataset.collapsed === '1';
     const setHidden = (el, hidden) => { if (hidden) el.setAttribute('data-li-hidden', '1'); else el.removeAttribute('data-li-hidden'); };
-    if (header.tagName === 'LI') {
+    if (header.dataset.toggleGroup) {
+      // 選取範圍建立的收合：只收/展開當初選取範圍內的成員，範圍外的內容完全不動
+      const members = bodyRef.current.querySelectorAll(`[data-toggle-member="${header.dataset.toggleGroup}"]`);
+      members.forEach(el => setHidden(el, !wasCollapsed));
+    } else if (header.tagName === 'LI') {
       // 不假設縮排是用巢狀 <ul>/<ol> 做的（瀏覽器的「縮排」指令有時是用 <blockquote>／inline margin
       // 實作），改成：header 底下只要是「區塊層級」的直接子元素（不是文字格式化用的 span/b/i/u）
       // 一律視為子內容收合，不管實際是用哪種標籤包起來的
@@ -2389,18 +2393,56 @@ function App() {
     const body = bodyRef.current; if (!body) return; body.focus();
     const sel = window.getSelection();
     if (!sel.rangeCount) return;
-    const startNode = sel.getRangeAt(0).startContainer;
+    const topChildOf = (node) => {
+      let n = node;
+      while (n && n.parentNode !== body) n = n.parentNode;
+      return (n && n.nodeType === 1) ? n : null;
+    };
+    const clearToggleGroup = (header) => {
+      if (!header.dataset.toggleGroup) return;
+      body.querySelectorAll(`[data-toggle-member="${header.dataset.toggleGroup}"]`)
+        .forEach(el => { el.removeAttribute('data-toggle-member'); el.removeAttribute('data-li-hidden'); });
+      header.removeAttribute('data-toggle-group');
+    };
+    // 有選取範圍（不只是游標）且橫跨多個區塊：第一行當標題，選取範圍內其餘的收起來，
+    // 選取以外的內容完全不處理、保持原樣。
+    const range = sel.getRangeAt(0);
+    if (!sel.isCollapsed) {
+      const startEl = topChildOf(range.startContainer);
+      const endEl = topChildOf(range.endContainer);
+      if (startEl && endEl && startEl !== endEl) {
+        const header = startEl;
+        clearToggleGroup(header);
+        header.dataset.toggle = '1';
+        if (!header.querySelector(':scope > .li-toggle-mark')) {
+          const mark = document.createElement('span');
+          mark.className = 'li-toggle-mark';
+          mark.contentEditable = 'false';
+          header.insertBefore(mark, header.firstChild);
+        }
+        const groupId = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        header.dataset.toggleGroup = groupId;
+        let sib = header.nextElementSibling;
+        while (sib) {
+          sib.setAttribute('data-toggle-member', groupId);
+          sib.setAttribute('data-li-hidden', '1');
+          if (sib === endEl) break;
+          sib = sib.nextElementSibling;
+        }
+        header.setAttribute('data-collapsed', '1');
+        updateNoteFields({ body: body.innerHTML });
+        return;
+      }
+    }
+    const startNode = range.startContainer;
     const startEl = startNode.nodeType === 1 ? startNode : startNode.parentElement;
     let header = startEl?.closest ? startEl.closest('li') : null;
     if (header && !body.contains(header)) header = null;
-    if (!header) {
-      let n = startNode;
-      while (n && n.parentNode !== body) n = n.parentNode;
-      if (n && n.nodeType === 1) header = n;
-    }
+    if (!header) header = topChildOf(startNode);
     if (!header) return;
     if (header.dataset.toggle === '1') {
-      if (header.dataset.collapsed === '1') toggleLiCollapse(header);
+      if (header.dataset.toggleGroup) clearToggleGroup(header);
+      else if (header.dataset.collapsed === '1') toggleLiCollapse(header);
       header.removeAttribute('data-toggle');
       header.removeAttribute('data-collapsed');
       header.querySelector(':scope > .li-toggle-mark')?.remove();
@@ -4361,7 +4403,7 @@ function App() {
                   h('button', { onMouseDown: (e) => { e.preventDefault(); applyListItem('li3', '。'); },
                     style: S.fmtBtn, title: '細項 。' }, '。細'),
                   h('button', { onMouseDown: (e) => { e.preventDefault(); toggleLiCollapsible(); },
-                    style: S.fmtBtn, title: '把游標所在的項目設為可收合／取消收合：設定後項目前會出現三角形，點三角形可收合或展開底下的子項目' }, '▶ 收合'),
+                    style: S.fmtBtn, title: '選取多行文字再按下：第一行變標題、其餘選取範圍收起來（選取以外的內容不受影響）。只放游標不選取則沿用舊的單一項目收合方式' }, '▶ 收合'),
                   h('div', { style: S.fmtDivider }),
                   h('button', { onMouseDown: (e) => { e.preventDefault(); insertPageBreak(); },
                     style: S.fmtBtn, title: '插入分頁點，列印/匯出PDF時會從這裡另起一頁' }, '✂ 分頁')
