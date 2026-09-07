@@ -174,7 +174,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/09/07 11:55";
+const BUILD_TIME = "2026/09/07 12:23";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -2391,6 +2391,17 @@ function App() {
   };
   const toggleLiCollapsible = () => {
     const body = bodyRef.current; if (!body) return; body.focus();
+    // Chrome 的 contenteditable 有個怪癖：剛打好、還沒按過 Enter 的第一行，內容是
+    // 直接掛在 body 底下的「裸」文字節點，沒有包 <div>，不會出現在 body.children
+    // 裡——選取「哪些行在範圍內」時就會整個漏掉第一行，導致從第二行開始收合。
+    // 這裡先把這種裸文字節點包成 <div>，讓每一行都能穩定被當成一個頂層元素。
+    Array.from(body.childNodes).forEach(n => {
+      if (n.nodeType === 3 && n.textContent.trim() !== '') {
+        const div = document.createElement('div');
+        n.replaceWith(div);
+        div.appendChild(n);
+      }
+    });
     const sel = window.getSelection();
     if (!sel.rangeCount) return;
     // 不用手動沿 parentNode 往上爬來找頂層節點：選取範圍的起點/終點常常會落在
