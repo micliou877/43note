@@ -174,7 +174,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/09/07 12:23";
+const BUILD_TIME = "2026/09/07 12:47";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -2389,6 +2389,18 @@ function App() {
     if (wasCollapsed) header.removeAttribute('data-collapsed'); else header.setAttribute('data-collapsed', '1');
     updateNoteFields({ body: bodyRef.current.innerHTML });
   };
+  const clearAllCollapseMarks = () => {
+    const body = bodyRef.current; if (!body) return; body.focus();
+    body.querySelectorAll('[data-toggle]').forEach(el => {
+      el.removeAttribute('data-toggle');
+      el.removeAttribute('data-collapsed');
+      el.removeAttribute('data-toggle-group');
+      el.querySelector(':scope > .li-toggle-mark')?.remove();
+    });
+    body.querySelectorAll('[data-toggle-member]').forEach(el => el.removeAttribute('data-toggle-member'));
+    body.querySelectorAll('[data-li-hidden]').forEach(el => el.removeAttribute('data-li-hidden'));
+    updateNoteFields({ body: body.innerHTML });
+  };
   const toggleLiCollapsible = () => {
     const body = bodyRef.current; if (!body) return; body.focus();
     // Chrome 的 contenteditable 有個怪癖：剛打好、還沒按過 Enter 的第一行，內容是
@@ -4424,6 +4436,8 @@ function App() {
                     style: S.fmtBtn, title: '細項 。' }, '。細'),
                   h('button', { onMouseDown: (e) => { e.preventDefault(); toggleLiCollapsible(); },
                     style: S.fmtBtn, title: '選取多行文字再按下：第一行變標題、其餘選取範圍收起來（選取以外的內容不受影響）。只放游標不選取則沿用舊的單一項目收合方式' }, '▶ 收合'),
+                  h('button', { onMouseDown: (e) => { e.preventDefault(); clearAllCollapseMarks(); },
+                    style: { ...S.fmtBtn, fontSize: 11, color: '#94a3b8' }, title: '清除整篇筆記裡所有的收合標記與隱藏內容，全部還原成正常顯示（用來清掉測試或誤按留下的殘留標記）' }, '✕收合'),
                   h('div', { style: S.fmtDivider }),
                   h('button', { onMouseDown: (e) => { e.preventDefault(); insertPageBreak(); },
                     style: S.fmtBtn, title: '插入分頁點，列印/匯出PDF時會從這裡另起一頁' }, '✂ 分頁')
