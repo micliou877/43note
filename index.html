@@ -174,7 +174,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/09/07 12:47";
+const BUILD_TIME = "2026/09/07 14:07";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -2419,13 +2419,29 @@ function App() {
     // 不用手動沿 parentNode 往上爬來找頂層節點：選取範圍的起點/終點常常會落在
     // 兩個 <div> 之間的空白文字節點上（尤其縮排的行，左邊留白更容易點到），
     // 這種節點沒有對應的頂層元素，手動爬會爬到 null 導致整個功能悄悄沒反應。
-    // 改用 range.intersectsNode() 直接比對 body 的每個直屬子元素，不管起點/終點
-    // 實際落在哪個文字節點上都能正確判斷選取範圍涵蓋了哪些行（跟本檔案「✕格式」
-    // 按鈕清除選取範圍內背景色時用的是同一招，已驗證可靠）。
     const topChildOf = (node) => {
       let n = node;
       while (n && n.parentNode !== body) n = n.parentNode;
       return (n && n.nodeType === 1) ? n : null;
+    };
+    // 筆記內容不保證每一「行」都是 body 的直屬子元素——貼上或反覆縮排/取消縮排
+    // 之後，常常會有一個沒有任何 class/樣式、純粹分組用的 <div> 或 <blockquote>
+    // 把一大串本來各自獨立的行都包在裡面（例如把「照片:」到筆記結尾全部包成一個
+    // div）。如果只看 body.children，這一大包會被當成「一行」，收合時只要選到
+    // 裡面任何一小段，就會把整包（含選取範圍以外的內容）一起藏起來。
+    // 這裡改成遞迴展開：遇到本身沒有樣式、只是包著其他區塊元素的 <div>/<blockquote>，
+    // 就穿透進去、把它的每個子元素當成獨立的一行，而不是把整包當一行。
+    const BLOCK_TAGS = ['DIV', 'P', 'BLOCKQUOTE', 'UL', 'OL', 'LI'];
+    const isBlockEl = (el) => el.nodeType === 1 && BLOCK_TAGS.includes(el.tagName);
+    const flattenLines = (container) => {
+      const lines = [];
+      Array.from(container.children).forEach(el => {
+        const isPureWrapper = ['DIV', 'BLOCKQUOTE'].includes(el.tagName) &&
+          Array.from(el.children).some(isBlockEl);
+        if (isPureWrapper) lines.push(...flattenLines(el));
+        else lines.push(el);
+      });
+      return lines;
     };
     const clearToggleGroup = (header) => {
       if (!header.dataset.toggleGroup) return;
@@ -2437,7 +2453,8 @@ function App() {
     // 選取以外的內容完全不處理、保持原樣。
     const range = sel.getRangeAt(0);
     if (!sel.isCollapsed) {
-      const touched = Array.from(body.children).filter(el => range.intersectsNode(el));
+      const allLines = flattenLines(body);
+      const touched = allLines.filter(el => range.intersectsNode(el));
       if (touched.length > 1) {
         const header = touched[0];
         const lastEl = touched[touched.length - 1];
@@ -2451,12 +2468,11 @@ function App() {
         }
         const groupId = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
         header.dataset.toggleGroup = groupId;
-        let sib = header.nextElementSibling;
-        while (sib) {
-          sib.setAttribute('data-toggle-member', groupId);
-          sib.setAttribute('data-li-hidden', '1');
-          if (sib === lastEl) break;
-          sib = sib.nextElementSibling;
+        const headerIdx = allLines.indexOf(header);
+        const lastIdx = allLines.indexOf(lastEl);
+        for (let i = headerIdx + 1; i <= lastIdx; i++) {
+          allLines[i].setAttribute('data-toggle-member', groupId);
+          allLines[i].setAttribute('data-li-hidden', '1');
         }
         header.setAttribute('data-collapsed', '1');
         updateNoteFields({ body: body.innerHTML });
@@ -2468,7 +2484,7 @@ function App() {
     let header = startEl?.closest ? startEl.closest('li') : null;
     if (header && !body.contains(header)) header = null;
     if (!header) {
-      const touched = Array.from(body.children).filter(el => range.intersectsNode(el));
+      const touched = flattenLines(body).filter(el => range.intersectsNode(el));
       header = touched[0] || topChildOf(startNode);
     }
     if (!header) return;
