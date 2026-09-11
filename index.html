@@ -88,6 +88,23 @@
     button { min-height: 40px; }
     /* 手機：小圖示按鈕（📌✏️🗑等）用負邊界擴大熱區，不影響版面 */
     .tap-icon { padding: 10px !important; margin: -10px !important; }
+    /* 手機：儲存/匯出/加照片…按鈕改成整齊的 2 欄網格，取代原本高矮不一、擠成一團的斷行 */
+    .note-actions-row { display: grid !important; grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
+    .note-actions-row > button, .note-actions-row > label { width: 100% !important; justify-content: center !important; margin: 0 !important; box-sizing: border-box; }
+    .note-actions-row > span { grid-column: 1 / -1; display: grid !important; grid-template-columns: 1fr 1fr !important; }
+    /* 手機：格式工具列（B I U 字級 顏色 清單…）改成單行左右滑動，不再擠成好幾排 */
+    .fmt-bar-mobile { flex-wrap: nowrap !important; overflow-x: auto !important; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 8px !important; }
+    .fmt-bar-mobile::-webkit-scrollbar { display: none; }
+    .fmt-bar-mobile > div { flex-wrap: nowrap !important; flex-shrink: 0; }
+    /* 手機：工具列收合手把 */
+    .toolbar-collapse-handle {
+      display: flex !important; align-items: center; justify-content: center; gap: 4px;
+      width: 100%; margin: 0 0 10px; padding: 6px 0; min-height: 0 !important;
+      background: #f8fafc; border: 1px dashed #e2e8f0 !important; border-radius: 8px;
+      color: #94a3b8; font-size: 12px; cursor: pointer;
+    }
+    .toolbar-collapse-handle:active { color: #0d9488; border-color: #0d9488 !important; }
+    .toolbar-collapsible-hide { display: none !important; }
   }
   .note-body { font-family: inherit; }
   .note-body:empty::before { content: attr(data-placeholder); color: #9ca3af; pointer-events: none; display: block; }
@@ -176,7 +193,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/09/11 15:24";
+const BUILD_TIME = "2026/09/11 15:31";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1612,6 +1629,8 @@ function App() {
   const [listCollapsed, setListCollapsed] = useState(() => localStorage.getItem('listCollapsed') === '1');
   const [focusMode, setFocusMode] = useState(false); // 寫筆記時可切換全螢幕，隱藏左側專案/筆記列表
   const [readMode, setReadMode] = useState(false); // 手機上的純閱讀模式：隱藏編輯工具列、關掉 contentEditable，避免誤觸鍵盤
+  const [toolbarOpen, setToolbarOpen] = useState(() => localStorage.getItem('noteToolbarOpen') !== '0'); // 手機上可收合工具列（存/匯出按鈕＋格式列），編輯功能仍在，只是先藏起來省空間
+  useEffect(() => { localStorage.setItem('noteToolbarOpen', toolbarOpen ? '1' : '0'); }, [toolbarOpen]);
 
   const lastLocalEdit = useRef(0);
   const dragId        = useRef(null);
@@ -4377,7 +4396,11 @@ function App() {
                 h('button', { className: 'mobile-only', onClick: () => setReadMode(r => !r), title: readMode ? '離開閱讀模式' : '閱讀模式：隱藏編輯工具，以閱讀為優先',
                   style: { background: 'none', border: readMode ? '1px solid #0d9488' : '1px solid #e2e8f0', borderRadius: 6, fontSize: 16, padding: '4px 8px', cursor: 'pointer', color: readMode ? '#0d9488' : '#64748b', flexShrink: 0 } }, readMode ? '✎' : '👁')
               ),
-              !readMode && h('div', { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+              !readMode && h('button', { className: 'mobile-only toolbar-collapse-handle', onClick: () => setToolbarOpen(o => !o) },
+                h('span', null, toolbarOpen ? '收合工具列' : '展開工具列'),
+                h('span', { style: { transform: toolbarOpen ? 'rotate(180deg)' : 'none', transition: 'transform .15s', fontSize: 10 } }, '▾')
+              ),
+              !readMode && h('div', { className: 'no-print note-actions-row' + (toolbarOpen ? '' : ' toolbar-collapsible-hide'), style: { display: "flex", gap: 8, flexWrap: "wrap" } },
                 h('button', { onClick: manualSaveNote, style: { ...S.primaryBtnSm, background: '#3b82f6' } }, '💾 儲存'),
                 h('button', { onClick: copyNoteText, title: '複製全部文字內容', style: { ...S.ghostBtn, color: copyFeedback ? '#059669' : undefined } }, copyFeedback ? '✓ 已複製' : '📋 複製全文'),
                 h('button', { onClick: exportToPDF, title: '匯出為 PDF', style: S.ghostBtn }, '📄 匯出 PDF'),
@@ -4401,7 +4424,7 @@ function App() {
                   : h('button', { onClick: () => setConfirmDel({ type: "note", id: activeNote.id }), style: S.dangerBtn }, '🗑')
               )
             ),
-            !readMode && h('div', { className: 'no-print', style: S.editorDate },
+            !readMode && h('div', { className: 'no-print' + (toolbarOpen ? '' : ' toolbar-collapsible-hide'), style: S.editorDate },
               h('span', { style: { color: saveStatus === 'unsaved' ? '#f59e0b' : saveStatus === 'saving' ? '#64748b' : '#9ca3af' } },
                 saveStatus === 'unsaved' ? '● 未儲存（停止輸入 2 秒後自動存）' :
                 saveStatus === 'saving'  ? '儲存中…' :
@@ -4411,7 +4434,7 @@ function App() {
               h('span', { style: { ...S.sizeBar, ...(sizePct > 85 ? S.sizeBarFull : {}) } },
                 `${(noteSize / 1024).toFixed(0)} KB / 1 MB (${sizePct}%)`)
             ),
-            !readMode && activeNote.tags?.length > 0 && h('div', { className: 'no-print', style: { display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 10 } },
+            !readMode && activeNote.tags?.length > 0 && h('div', { className: 'no-print' + (toolbarOpen ? '' : ' toolbar-collapsible-hide'), style: { display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 10 } },
               ...activeNote.tags.map(tid => {
                 const p = projects.find(x => x.id === tid);
                 if (!p) return null;
@@ -4420,7 +4443,7 @@ function App() {
                   `🏷️ ${p.name}`);
               })
             ),
-              !readMode && h('div', { className: 'no-print', style: { ...S.fmtBar, justifyContent: 'space-between' } },
+              !readMode && h('div', { className: 'no-print fmt-bar-mobile' + (toolbarOpen ? '' : ' toolbar-collapsible-hide'), style: { ...S.fmtBar, justifyContent: 'space-between' } },
                 h('div', { style: { display: 'flex', gap: 3, alignItems: 'center', flexWrap: 'wrap' } },
                   h('button', { onMouseDown: (e) => { e.preventDefault(); document.execCommand('bold'); bodyRef.current?.focus(); },
                     style: { ...S.fmtBtn, fontWeight: 700 }, title: '粗體 (Ctrl+B)' }, 'B'),
