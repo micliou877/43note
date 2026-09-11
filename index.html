@@ -174,7 +174,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/09/07 14:07";
+const BUILD_TIME = "2026/09/11 14:17";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -2449,6 +2449,20 @@ function App() {
         .forEach(el => { el.removeAttribute('data-toggle-member'); el.removeAttribute('data-li-hidden'); });
       header.removeAttribute('data-toggle-group');
     };
+    // 貼上網頁內容（例如法規查詢網站的表格）常常整段是 <table>/<ul>/<ol> 等
+    // 只允許特定子元素的標籤，直接把 ▶ 收合圖示塞進去當第一個子節點會產生不合法的
+    // HTML（例如 <table><span>…</span><tbody>…）。這種結構在瀏覽器重新解析 HTML
+    // 字串時（存檔後重新渲染 innerHTML）會被「foster parenting」搬到 table 外面，
+    // 圖示就會跟標題元素分家，之後點擊收合圖示會找錯 header，導致收合完全沒反應。
+    // 遇到這類標籤就先包一層 <div> 再把圖示放進 div，維持合法巢狀。
+    const RESTRICTED_CHILD_TAGS = ['TABLE', 'THEAD', 'TBODY', 'TFOOT', 'TR', 'COLGROUP', 'COL', 'UL', 'OL', 'DL'];
+    const wrapIfRestricted = (el) => {
+      if (!RESTRICTED_CHILD_TAGS.includes(el.tagName)) return el;
+      const wrapper = document.createElement('div');
+      el.parentNode.insertBefore(wrapper, el);
+      wrapper.appendChild(el);
+      return wrapper;
+    };
     // 有選取範圍（不只是游標）且橫跨多個區塊：第一行當標題，選取範圍內其餘的收起來，
     // 選取以外的內容完全不處理、保持原樣。
     const range = sel.getRangeAt(0);
@@ -2456,9 +2470,12 @@ function App() {
       const allLines = flattenLines(body);
       const touched = allLines.filter(el => range.intersectsNode(el));
       if (touched.length > 1) {
-        const header = touched[0];
+        let header = touched[0];
         const lastEl = touched[touched.length - 1];
+        const headerIdx = allLines.indexOf(header);
+        const lastIdx = allLines.indexOf(lastEl);
         clearToggleGroup(header);
+        header = wrapIfRestricted(header);
         header.dataset.toggle = '1';
         if (!header.querySelector(':scope > .li-toggle-mark')) {
           const mark = document.createElement('span');
@@ -2468,8 +2485,6 @@ function App() {
         }
         const groupId = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
         header.dataset.toggleGroup = groupId;
-        const headerIdx = allLines.indexOf(header);
-        const lastIdx = allLines.indexOf(lastEl);
         for (let i = headerIdx + 1; i <= lastIdx; i++) {
           allLines[i].setAttribute('data-toggle-member', groupId);
           allLines[i].setAttribute('data-li-hidden', '1');
@@ -2495,6 +2510,7 @@ function App() {
       header.removeAttribute('data-collapsed');
       header.querySelector(':scope > .li-toggle-mark')?.remove();
     } else {
+      header = wrapIfRestricted(header);
       header.dataset.toggle = '1';
       const mark = document.createElement('span');
       mark.className = 'li-toggle-mark';
