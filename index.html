@@ -176,7 +176,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/09/11 15:21";
+const BUILD_TIME = "2026/09/11 15:24";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1668,6 +1668,15 @@ function App() {
   useEffect(() => { activeNoteRef.current = activeNote; }, [activeNote]);
   useEffect(() => { if (!activeNote) setFocusMode(false); }, [activeNote]);
   useEffect(() => { if (!activeNote) setReadMode(false); }, [activeNote]);
+  // 整個網站預設用 viewport 鎖死縮放（避免編輯筆記時手滑誤觸放大），
+  // 純閱讀模式時放開限制，讓手機可以兩指縮放看清楚內容；離開閱讀模式再鎖回去。
+  useEffect(() => {
+    const meta = document.querySelector('meta[name="viewport"]');
+    if (!meta) return;
+    meta.setAttribute('content', readMode
+      ? 'width=device-width, initial-scale=1.0'
+      : 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
+  }, [readMode]);
   useEffect(() => {
     bodyUndoStack.current = [];
     bodyUndoLastPush.current = 0;
