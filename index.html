@@ -174,7 +174,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/09/11 14:49";
+const BUILD_TIME = "2026/09/11 15:10";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -4619,12 +4619,13 @@ function App() {
                     reader.readAsDataURL(file);
                     return;
                   }
-                  const ph = e.clipboardData?.getData('text/html') || '';
-                  if (/<img\b/i.test(ph)) {
-                    e.preventDefault();
-                    const pt = e.clipboardData?.getData('text/plain') || '';
-                    if (pt) document.execCommand('insertText', false, pt);
-                  }
+                  // 從外部（網頁、Word、其他 App）複製進來的內容一律去除格式貼成純文字，
+                  // 避免帶入來源的表格／清單／大量 inline style，把筆記結構弄亂
+                  // （例如法規網站的巢狀表格）。真的要保留格式的圖片已經在上面用
+                  // clipboardData.items 的 image/* 分支處理掉了，這裡只剩文字/HTML。
+                  e.preventDefault();
+                  const pt = e.clipboardData?.getData('text/plain') || '';
+                  if (pt) document.execCommand('insertText', false, pt);
                 },
                 onKeyDown: (e) => {
                   if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undoBodyEdit(); return; }
