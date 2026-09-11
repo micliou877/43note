@@ -174,7 +174,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/09/11 14:40";
+const BUILD_TIME = "2026/09/11 14:49";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -2539,12 +2539,34 @@ function App() {
       header.removeAttribute('data-collapsed');
       header.querySelector(':scope > .li-toggle-mark')?.remove();
     } else {
-      header = wrapIfRestricted(header);
-      header.dataset.toggle = '1';
+      // 整段內容常常不是分成多個 <div>，而是同一個 <div> 裡用 <br> 手動換行
+      // 分好幾「行」（例如貼上或 Shift+Enter 打出的清單）。這種情況標題和要收合
+      // 的內容其實是同一個元素，一般邏輯只能把整個 div 當成標題本身，永遠沒有
+      // 東西可收。這裡改成找到第一個 <br>，把它跟它後面的內容包成一個 member
+      // span，重用 toggle-group 機制收合，只留第一行當標題。
+      const firstBr = header.tagName !== 'LI'
+        ? Array.from(header.childNodes).find(n => n.nodeType === 1 && n.tagName === 'BR')
+        : null;
       const mark = document.createElement('span');
       mark.className = 'li-toggle-mark';
       mark.contentEditable = 'false';
-      header.insertBefore(mark, header.firstChild);
+      if (firstBr) {
+        const wrapper = document.createElement('span');
+        let n = firstBr;
+        while (n) { const next = n.nextSibling; wrapper.appendChild(n); n = next; }
+        header.appendChild(wrapper);
+        header.insertBefore(mark, header.firstChild);
+        const groupId = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        header.dataset.toggle = '1';
+        header.dataset.toggleGroup = groupId;
+        header.setAttribute('data-collapsed', '1');
+        wrapper.setAttribute('data-toggle-member', groupId);
+        wrapper.setAttribute('data-li-hidden', '1');
+      } else {
+        header = wrapIfRestricted(header);
+        header.dataset.toggle = '1';
+        header.insertBefore(mark, header.firstChild);
+      }
     }
     updateNoteFields({ body: body.innerHTML });
   };
