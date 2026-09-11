@@ -98,6 +98,8 @@
   .note-body img[data-inline]:hover { outline: 2px solid #0d9488; }
   .note-body img[data-inline].img-sel { outline: 2px solid #0d9488; }
   .note-body { overflow: hidden; position: relative; }
+  .note-body-readmode { cursor: default; }
+  .note-body-readmode img[data-inline] { cursor: default; }
   .note-body img[data-inline].img-row { float: left !important; margin: 3px 1% 8px 0 !important; }
   .note-body img[data-inline].img-free { position: absolute; float: none !important; margin: 0 !important; cursor: move; z-index: 5; }
   .note-body .li1 { margin: 3px 0; }
@@ -174,7 +176,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/09/11 15:10";
+const BUILD_TIME = "2026/09/11 15:21";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1609,6 +1611,7 @@ function App() {
   const [listWidth, setListWidth] = useState(() => parseInt(localStorage.getItem('listW') || '290'));
   const [listCollapsed, setListCollapsed] = useState(() => localStorage.getItem('listCollapsed') === '1');
   const [focusMode, setFocusMode] = useState(false); // 寫筆記時可切換全螢幕，隱藏左側專案/筆記列表
+  const [readMode, setReadMode] = useState(false); // 手機上的純閱讀模式：隱藏編輯工具列、關掉 contentEditable，避免誤觸鍵盤
 
   const lastLocalEdit = useRef(0);
   const dragId        = useRef(null);
@@ -1664,6 +1667,7 @@ function App() {
 
   useEffect(() => { activeNoteRef.current = activeNote; }, [activeNote]);
   useEffect(() => { if (!activeNote) setFocusMode(false); }, [activeNote]);
+  useEffect(() => { if (!activeNote) setReadMode(false); }, [activeNote]);
   useEffect(() => {
     bodyUndoStack.current = [];
     bodyUndoLastPush.current = 0;
@@ -4360,9 +4364,11 @@ function App() {
             h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12, paddingBottom: 16, marginBottom: 12, borderBottom: '1px solid #f1f5f9' } },
               h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, width: '100%' } },
                 h('button', { className: 'mobile-only', onClick: () => setMobileView('list'), style: { background: 'none', border: 'none', fontSize: 28, padding: '0 8px 0 0', cursor: 'pointer', color: '#64748b' } }, '‹'),
-                h('input', { value: activeNote.title || '', onChange: (e) => updateNoteFields({ title: e.target.value }), placeholder: '筆記標題', style: { ...S.titleInput, width: '100%', minWidth: 0 } })
+                h('input', { value: activeNote.title || '', onChange: (e) => updateNoteFields({ title: e.target.value }), placeholder: '筆記標題', style: { ...S.titleInput, width: '100%', minWidth: 0 } }),
+                h('button', { className: 'mobile-only', onClick: () => setReadMode(r => !r), title: readMode ? '離開閱讀模式' : '閱讀模式：隱藏編輯工具，以閱讀為優先',
+                  style: { background: 'none', border: readMode ? '1px solid #0d9488' : '1px solid #e2e8f0', borderRadius: 6, fontSize: 16, padding: '4px 8px', cursor: 'pointer', color: readMode ? '#0d9488' : '#64748b', flexShrink: 0 } }, readMode ? '✎' : '👁')
               ),
-              h('div', { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+              !readMode && h('div', { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
                 h('button', { onClick: manualSaveNote, style: { ...S.primaryBtnSm, background: '#3b82f6' } }, '💾 儲存'),
                 h('button', { onClick: copyNoteText, title: '複製全部文字內容', style: { ...S.ghostBtn, color: copyFeedback ? '#059669' : undefined } }, copyFeedback ? '✓ 已複製' : '📋 複製全文'),
                 h('button', { onClick: exportToPDF, title: '匯出為 PDF', style: S.ghostBtn }, '📄 匯出 PDF'),
@@ -4386,7 +4392,7 @@ function App() {
                   : h('button', { onClick: () => setConfirmDel({ type: "note", id: activeNote.id }), style: S.dangerBtn }, '🗑')
               )
             ),
-            h('div', { className: 'no-print', style: S.editorDate },
+            !readMode && h('div', { className: 'no-print', style: S.editorDate },
               h('span', { style: { color: saveStatus === 'unsaved' ? '#f59e0b' : saveStatus === 'saving' ? '#64748b' : '#9ca3af' } },
                 saveStatus === 'unsaved' ? '● 未儲存（停止輸入 2 秒後自動存）' :
                 saveStatus === 'saving'  ? '儲存中…' :
@@ -4396,7 +4402,7 @@ function App() {
               h('span', { style: { ...S.sizeBar, ...(sizePct > 85 ? S.sizeBarFull : {}) } },
                 `${(noteSize / 1024).toFixed(0)} KB / 1 MB (${sizePct}%)`)
             ),
-            activeNote.tags?.length > 0 && h('div', { className: 'no-print', style: { display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 10 } },
+            !readMode && activeNote.tags?.length > 0 && h('div', { className: 'no-print', style: { display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 10 } },
               ...activeNote.tags.map(tid => {
                 const p = projects.find(x => x.id === tid);
                 if (!p) return null;
@@ -4405,7 +4411,7 @@ function App() {
                   `🏷️ ${p.name}`);
               })
             ),
-              h('div', { className: 'no-print', style: { ...S.fmtBar, justifyContent: 'space-between' } },
+              !readMode && h('div', { className: 'no-print', style: { ...S.fmtBar, justifyContent: 'space-between' } },
                 h('div', { style: { display: 'flex', gap: 3, alignItems: 'center', flexWrap: 'wrap' } },
                   h('button', { onMouseDown: (e) => { e.preventDefault(); document.execCommand('bold'); bodyRef.current?.focus(); },
                     style: { ...S.fmtBtn, fontWeight: 700 }, title: '粗體 (Ctrl+B)' }, 'B'),
@@ -4538,10 +4544,10 @@ function App() {
             h('h1', { className: 'print-only-title' }, activeNote.title || '未命名筆記'),
             h('div', {
                 ref: bodyRef,
-                contentEditable: true,
+                contentEditable: !readMode,
                 suppressContentEditableWarning: true,
                 'data-placeholder': '在這裡寫工作記事…　拍照或匯入照片後，點照片即可在上面畫圖、標註。',
-                className: 'note-body',
+                className: 'note-body' + (readMode ? ' note-body-readmode' : ''),
                 onMouseDown: startFreeImgDrag,
                 onClick: (e) => {
                   const mark = e.target.closest?.('.li-toggle-mark');
