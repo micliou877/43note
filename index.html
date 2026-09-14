@@ -193,7 +193,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/09/11 15:31";
+const BUILD_TIME = "2026/09/14 17:16";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -2495,10 +2495,70 @@ function App() {
       wrapper.appendChild(el);
       return wrapper;
     };
+    // 貼上或用 Shift+Enter 打出來的多行內容，常常是同一個 <div> 裡用一串 <br>
+    // 手動分行（中間可能還包了一層沒有樣式、純粹分組用的 <span>），例如
+    // 「台灣鐵塔缺：」＋下面幾行說明其實是同一個 div。這種情況下，選取範圍的起點
+    // 或終點如果剛好落在這種 div 「中間」（不是選整個 div），過去只能把整個 div
+    // 當成密不可分的一行，選取範圍再怎麼選都無法把其中一行單獨當標題、其他行
+    // 當內容分開收合。這裡在計算選取範圍之前，先把選取起點/終點所在、還沒被
+    // 標記過收合的這種 div，物理拆成一行一個獨立的 <div>，之後的邏輯才能正確
+    // 依照實際選取範圍切出標題和收合內容的分界。只拆選取範圍實際牽涉到的 div，
+    // 不影響筆記其他地方原本用 <br> 分行的排版。
+    const splitBrLinesIfNeeded = (node) => {
+      let el = node.nodeType === 1 ? node : node.parentElement;
+      while (el && el.parentNode !== body) el = el.parentNode;
+      if (!el || el.tagName !== 'DIV') return;
+      if (!Array.from(el.childNodes).some(n => n.nodeType === 1 && n.tagName === 'BR')) return;
+      // 這個 div 本身如果是舊 header（自己有 data-toggle-group），先把它舊的
+      // group 解散、釋放所有 member（不管那些 member 現在人在哪裡），避免拆掉
+      // 這個 div 之後，殘留一批指向「已經不存在的 header」的孤兒 member。
+      if (el.dataset.toggleGroup) clearToggleGroup(el);
+      const BLOCK_TAGS_LOCAL = ['UL', 'OL', 'DIV', 'P', 'BLOCKQUOTE'];
+      const flatNodes = [];
+      const flatten = (n0) => {
+        Array.from(n0.childNodes).forEach(n => {
+          if (n.nodeType === 1 && n.classList?.contains('li-toggle-mark')) return; // 舊的 ▶ 收合圖示，丟棄不留
+          if (n.nodeType === 1 && n.tagName === 'SPAN' && !n.getAttribute('style') && !n.className) flatten(n);
+          else flatNodes.push(n);
+        });
+      };
+      flatten(el);
+      const lines = [[]];
+      flatNodes.forEach(n => {
+        if (n.nodeType === 1 && n.tagName === 'BR') { lines.push([]); return; }
+        if (n.nodeType === 1 && BLOCK_TAGS_LOCAL.includes(n.tagName)) {
+          if (lines[lines.length - 1].length) lines.push([]);
+          lines[lines.length - 1].push(n);
+          lines.push([]);
+          return;
+        }
+        lines[lines.length - 1].push(n);
+      });
+      if (lines.length < 2) return;
+      const frag = document.createDocumentFragment();
+      lines.forEach(nodes => {
+        const div = document.createElement('div');
+        if (nodes.length) nodes.forEach(n => div.appendChild(n));
+        else div.appendChild(document.createElement('br'));
+        frag.appendChild(div);
+      });
+      el.replaceWith(frag);
+    };
     // 有選取範圍（不只是游標）且橫跨多個區塊：第一行當標題，選取範圍內其餘的收起來，
     // 選取以外的內容完全不處理、保持原樣。
     const range = sel.getRangeAt(0);
     if (!sel.isCollapsed) {
+      const startNode = range.startContainer, startOffset = range.startOffset;
+      const endNode = range.endContainer, endOffset = range.endOffset;
+      splitBrLinesIfNeeded(startNode);
+      splitBrLinesIfNeeded(endNode);
+      // 上面拆分過程中會把文字節點搬到新的 <div> 裡——瀏覽器對「還活著」的
+      // Range 會在節點被搬離原本父層時，自動把邊界重新定位到節點原本所在
+      // 的位置，而不是跟著節點一起搬過去，導致 range 的起點/終點悄悄跑掉、
+      // 選到範圍以外的行。這裡用搬移前記下的節點＋offset，把邊界手動對回
+      // 正確位置（節點物件本身沒被換掉，只是換了父層，可以直接重新指定）。
+      range.setStart(startNode, startOffset);
+      range.setEnd(endNode, endOffset);
       const allLines = flattenLines(body);
       const touched = allLines.filter(el => range.intersectsNode(el));
       if (touched.length > 1) {
@@ -2506,7 +2566,21 @@ function App() {
         const lastEl = touched[touched.length - 1];
         const headerIdx = allLines.indexOf(header);
         const lastIdx = allLines.indexOf(lastEl);
-        clearToggleGroup(header);
+        // 這次選取的範圍裡，可能疊到之前已經存在的收合標記——選到的某一行本身是
+        // 舊的 header（自己有 data-toggle-group），或是某個舊 group 的 member。
+        // 如果只清 header 自己的舊 group，範圍內其餘殘留的舊標記會跟新建立的
+        // group 攪在一起，造成 member 被切成不相鄰的兩截、收合抓錯範圍。
+        // 這裡把選取範圍內每一行的舊收合標記都先清乾淨（包含連帶清掉舊 header
+        // 底下不在這次選取範圍內的舊 member），再重新建立全新、乾淨的一組。
+        for (let i = headerIdx; i <= lastIdx; i++) {
+          const line = allLines[i];
+          if (line.dataset.toggleGroup) clearToggleGroup(line);
+          line.removeAttribute('data-toggle');
+          line.removeAttribute('data-collapsed');
+          line.removeAttribute('data-toggle-member');
+          line.removeAttribute('data-li-hidden');
+          line.querySelector(':scope > .li-toggle-mark')?.remove();
+        }
         header = wrapIfRestricted(header);
         header.dataset.toggle = '1';
         if (!header.querySelector(':scope > .li-toggle-mark')) {
