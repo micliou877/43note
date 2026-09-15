@@ -138,6 +138,10 @@
   .note-fontsize-input { -moz-appearance: textfield; }
   .print-only-title { display: none; }
   @media print {
+    /* 螢光筆是用 span 的 inline background-color 做的，Chrome/Edge 預設列印時
+       會自動略過背景色（除非使用者在列印對話框手動勾「背景圖形」），
+       這裡強制保留，不然匯出 PDF 螢光筆看起來就像失效消失。 */
+    .note-body, .note-body * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
     aside, section, .resize-handle, .no-print { display: none !important; }
     .print-only-title { display: block !important; font-size: 22px; font-weight: 700; color: #1f2937; margin: 0 0 12px; padding: 0; }
     /* 解除整條 flex 高度鏈，讓內容自由撐開換頁 */
@@ -193,7 +197,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/09/14 17:16";
+const BUILD_TIME = "2026/09/15 10:25";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
