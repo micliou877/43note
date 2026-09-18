@@ -197,7 +197,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/09/15 10:25";
+const BUILD_TIME = "2026/09/18 09:45";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -3401,12 +3401,10 @@ function App() {
 
   const globalSearchModal = globalSearchOpen && h('div', {
     className: 'no-print',
-    style: { position: 'fixed', inset: 0, background: 'rgba(15,23,42,.72)', zIndex: 500, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '10vh 20px 20px' },
-    onClick: (e) => e.target === e.currentTarget && setGlobalSearchOpen(false)
+    style: { position: 'fixed', top: 16, right: 16, zIndex: 500, width: 'min(400px, calc(100vw - 32px))', maxHeight: '75vh', display: 'flex', flexDirection: 'column', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,.25)', border: '1px solid #e5e7eb' }
   },
-    h('div', { style: { background: '#fff', borderRadius: 14, width: '100%', maxWidth: 560, maxHeight: '70vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,.25)' } },
-      h('div', { style: { padding: '14px 16px', borderBottom: '1px solid #f1f5f9' } },
-        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 10, padding: '8px 12px' } },
+      h('div', { style: { padding: '14px 16px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 8 } },
+        h('div', { style: { flex: 1, display: 'flex', alignItems: 'center', gap: 8, background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 10, padding: '8px 12px' } },
           h('span', { style: { color: '#94a3b8', fontSize: 15 } }, '🔍'),
           h('input', {
             autoFocus: true,
@@ -3417,7 +3415,8 @@ function App() {
             style: { flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: 15, color: '#1f2937', boxShadow: 'none' }
           }),
           globalSearchQuery && h('button', { onClick: () => setGlobalSearchQuery(''), style: { background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: 15, padding: 0, lineHeight: 1 } }, '✕')
-        )
+        ),
+        h('button', { onClick: () => setGlobalSearchOpen(false), title: '關閉搜尋 (Esc)', style: { background: 'none', border: 'none', cursor: 'pointer', color: '#94a3af', fontSize: 20, padding: 0, lineHeight: 1, flexShrink: 0 } }, '✕')
       ),
       h('div', { style: { overflowY: 'auto', flex: 1 } },
         globalSearchQuery.trim().length < 1
@@ -3441,9 +3440,8 @@ function App() {
                   if (!isTask) { setActiveNote(item); setMobileView('editor'); clearSelImg(); }
                   else setMobileView('list');
                   setSearch('');
-                  setGlobalSearchOpen(false);
                 },
-                style: { padding: '13px 18px', borderBottom: '1px solid #f8fafc', cursor: 'pointer' }
+                style: { padding: '13px 18px', borderBottom: '1px solid #f8fafc', cursor: 'pointer', background: !isTask && activeNote?.id === item.id ? '#f0fdfa' : 'transparent' }
               },
                 h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 } },
                   h('span', { style: { fontSize: 12, flexShrink: 0 } }, isTask ? (item.done ? '✅' : '☐') : '📝'),
@@ -3466,7 +3464,6 @@ function App() {
               );
             })
       )
-    )
   );
 
   let noteSize = 0, sizePct = 0;
