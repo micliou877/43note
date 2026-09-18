@@ -197,7 +197,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/09/18 09:45";
+const BUILD_TIME = "2026/09/18 10:53";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1664,6 +1664,7 @@ function App() {
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const [allNotesForSearch, setAllNotesForSearch] = useState([]);
   const [allTasksForSearch, setAllTasksForSearch] = useState([]);
+  const [searchJumpRequest, setSearchJumpRequest] = useState(null); // 從搜尋結果點筆記時，記錄要跳去哪個筆記、高亮哪個關鍵字
   const [showAllTasks, setShowAllTasks] = useState(true);
   const [allTasksFull, setAllTasksFull] = useState([]);
   const [allTasksFilter, setAllTasksFilter] = useState('pending');
@@ -1721,6 +1722,47 @@ function App() {
       if (migrated) updateNoteFields({ body: body.innerHTML });
     }
   }, [activeNote?.id]);
+
+  // 從搜尋結果點筆記：跳到關鍵字出現的位置並用紅色暫時高亮，像瀏覽器 Ctrl+F
+  useEffect(() => {
+    if (!searchJumpRequest) return;
+    const body = bodyRef.current;
+    if (!body || searchJumpRequest.noteId !== activeNote?.id) return;
+    setSearchJumpRequest(null);
+    body.querySelectorAll('mark.search-jump-highlight').forEach(m => {
+      const parent = m.parentNode; if (!parent) return;
+      while (m.firstChild) parent.insertBefore(m.firstChild, m);
+      parent.removeChild(m);
+      parent.normalize();
+    });
+    const q = searchJumpRequest.query;
+    if (!q) return;
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+    let target = null, idx = -1, node;
+    while ((node = walker.nextNode())) {
+      const i = node.nodeValue.indexOf(q);
+      if (i >= 0) { target = node; idx = i; break; }
+    }
+    if (!target) return;
+    const range = document.createRange();
+    range.setStart(target, idx);
+    range.setEnd(target, idx + q.length);
+    const mark = document.createElement('mark');
+    mark.className = 'search-jump-highlight';
+    mark.style.background = '#ef4444';
+    mark.style.color = '#fff';
+    mark.style.borderRadius = '3px';
+    mark.style.padding = '0 1px';
+    try { range.surroundContents(mark); } catch (e) { return; }
+    mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const timer = setTimeout(() => {
+      const parent = mark.parentNode; if (!parent) return;
+      while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+      parent.removeChild(mark);
+      parent.normalize();
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, [searchJumpRequest, activeNote?.id]);
 
   // 訂閱目前筆記的圖片 subcollection
   useEffect(() => {
@@ -3437,7 +3479,12 @@ function App() {
                   saveIfDirtyRef.current?.();
                   setSaveStatus('idle');
                   if (proj) { setActiveProject(proj); setTab(isTask ? 'tasks' : 'notes'); }
-                  if (!isTask) { setActiveNote(item); setMobileView('editor'); clearSelImg(); }
+                  if (!isTask) {
+                    setActiveNote(item);
+                    setMobileView('editor');
+                    clearSelImg();
+                    setSearchJumpRequest({ noteId: item.id, query: globalSearchQuery, ts: Date.now() });
+                  }
                   else setMobileView('list');
                   setSearch('');
                 },
