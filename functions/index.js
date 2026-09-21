@@ -1,10 +1,10 @@
-// 任務到期 LINE 提醒：每分鐘檢查一次，把「該提醒了」的任務用 LINE 官方帳號推播給自己。
-// 任務資料結構沿用 index.html：dueDate（台灣當地時間 "YYYY-MM-DDTHH:mm"）、reminderOffset（提前幾分鐘）。
+// 每天早上 6:00 把「今天到期」與「已逾期」還沒完成的任務彙整成一則 LINE 訊息傳給自己。
+// 任務資料結構沿用 index.html：users/{uid}/tasks，欄位 title、dueDate、done、deleted。
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { defineSecret, defineString } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
-const { MAX_OFFSET_MIN, GRACE_MS, toLocalStr, parseDue, buildMessage } = require('./lib');
+const { todayStr, buildDigest } = require('./lib');
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -22,43 +22,31 @@ async function pushLine(text) {
   if (!res.ok) throw new Error(`LINE API ${res.status}: ${await res.text()}`);
 }
 
-exports.lineTaskReminder = onSchedule(
+exports.lineDailyDigest = onSchedule(
   {
-    schedule: 'every 1 minutes',
+    schedule: '0 6 * * *',
     timeZone: 'Asia/Taipei',
     region: 'asia-east1',
     secrets: [LINE_CHANNEL_TOKEN, LINE_USER_ID],
     maxInstances: 1,
     memory: '256MiB',
     timeoutSeconds: 60,
+    retryCount: 2, // LINE 暫時失敗時重試，避免整天沒收到
   },
   async () => {
     const now = Date.now();
-    // 只讀「到期時間落在 [15 分鐘前, 1 天後] 」的任務，避免每分鐘掃全部任務浪費讀取次數
+    // 逾期可能是很久以前，所以只設上限（今天結束）；done/deleted 在程式裡濾掉。一天只讀一次，讀取量可忽略
     const snap = await db
       .collection(`users/${APP_UID.value()}/tasks`)
-      .where('dueDate', '>=', toLocalStr(now - GRACE_MS))
-      .where('dueDate', '<=', toLocalStr(now + (MAX_OFFSET_MIN + 5) * 60 * 1000))
+      .where('dueDate', '<=', `${todayStr(now)}T23:59`)
       .get();
 
-    for (const docSnap of snap.docs) {
-      const t = docSnap.data();
-      if (t.done || t.deleted || !t.dueDate || t.reminderOffset == null) continue;
-      // 用「到期時間|提前分鐘」當標記：改了到期時間或提醒設定，會自動重新提醒一次
-      const key = `${t.dueDate}|${t.reminderOffset}`;
-      if (t.lineRemindedFor === key) continue;
-      const alertAt = parseDue(t.dueDate) - t.reminderOffset * 60000;
-      if (now < alertAt || now >= alertAt + GRACE_MS) continue;
-
-      // 先標記再發送，避免標記寫入失敗造成每分鐘重複轟炸；發送失敗就取消標記，下一分鐘重試
-      await docSnap.ref.update({ lineRemindedFor: key });
-      try {
-        await pushLine(buildMessage(t));
-        logger.info('LINE 提醒已發送', { id: docSnap.id, title: t.title });
-      } catch (err) {
-        await docSnap.ref.update({ lineRemindedFor: admin.firestore.FieldValue.delete() });
-        logger.error('LINE 提醒發送失敗', { id: docSnap.id, err: String(err) });
-      }
+    const text = buildDigest(snap.docs.map((d) => d.data()), now);
+    if (!text) {
+      logger.info('今天沒有待處理任務，不發送');
+      return;
     }
+    await pushLine(text);
+    logger.info('每日任務彙整已發送', { length: text.length });
   }
 );
