@@ -8,7 +8,7 @@ const { onRequest } = require('firebase-functions/v2/https');
 const { defineSecret, defineString } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
-const { todayStr, buildDigest } = require('./lib');
+const { todayStr, buildDigest, buildSearchResult } = require('./lib');
 const { parseCommand, addDays } = require('./parse');
 
 admin.initializeApp();
@@ -57,6 +57,10 @@ const RULES_TEXT = [
   '【查詢】',
   '今天：列出今天到期加逾期的任務',
   '',
+  '搜尋 關鍵字 [關鍵字2 ...]',
+  '→ 在筆記的標題和內文找，多個關鍵字要全部出現（也可以用「找」）',
+  '範例：搜尋 外牆 裂縫',
+  '',
   '【日期寫法】',
   '今天、明天、後天、週三、下週三、9/25、9月25日、2026/12/31',
   '',
@@ -79,6 +83,7 @@ const HELP_TEXT = [
   '新增任務：新增 標題 明天 15:00',
   '新增筆記：筆記 標題（換行寫內文）',
   '查清單：今天',
+  '搜尋筆記：搜尋 關鍵字',
   '完整說明：規則',
 ].join('\n');
 
@@ -161,6 +166,21 @@ async function addNote({ title, body, project: projectQuery }) {
   });
   const lines = body ? body.split('\n').length : 0;
   return `📝 已加入「${project.name}」\n${title}\n${lines ? `內文 ${lines} 行` : '（只有標題）'}`;
+}
+
+// Firestore 沒有全文搜尋，個人筆記量不大，直接讀全部未刪除的筆記在程式裡比對
+async function searchNotes(keyword) {
+  const base = `users/${APP_UID.value()}`;
+  const [noteSnap, projSnap] = await Promise.all([
+    db.collection(`${base}/notes`).where('deleted', '==', false).get(),
+    db.collection(`${base}/projects`).get(),
+  ]);
+  const names = new Map(projSnap.docs.map((d) => [d.id, d.data().name || '']));
+  const notes = noteSnap.docs.map((d) => {
+    const n = d.data();
+    return { title: n.title, body: n.body, projectName: names.get(n.projectId), updatedMs: (n.updated || n.created)?.toMillis?.() || 0 };
+  });
+  return buildSearchResult(notes, keyword);
 }
 
 async function addTask(cmd) {
@@ -267,6 +287,7 @@ async function handleText(text) {
   if (cmd.cmd === 'today') return (await todayDigestText()) || '今天沒有待處理的任務 🎉';
   if (cmd.cmd === 'rules') return RULES_TEXT;
   if (cmd.cmd === 'note') return addNote(cmd);
+  if (cmd.cmd === 'search') return searchNotes(cmd.keyword);
   if (cmd.cmd === 'add') return addTask(cmd);
   if (cmd.cmd === 'ask') return askWhere(cmd.text);
   return HELP_TEXT;

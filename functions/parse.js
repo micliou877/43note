@@ -1,5 +1,5 @@
 // LINE 訊息指令解析（純邏輯，不依賴 Firebase）。
-// 支援：新增 標題 [日期] [時間] [@專案]、筆記 標題\n內文、今天、規則。日期/時間必須是「以空白隔開的獨立詞」才會被辨識。
+// 支援：新增 標題 [日期] [時間] [@專案]、筆記 標題\n內文、搜尋 關鍵字、今天、規則。日期/時間必須是「以空白隔開的獨立詞」才會被辨識。
 const { taipeiNow, todayStr } = require('./lib');
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -63,6 +63,10 @@ function parseCommand(rawText, nowMs) {
   if (/^(今天|今日|清單|list|today)$/i.test(text)) return { cmd: 'today' };
   if (/^(規則|說明|幫助|help|\?|？)$/i.test(text)) return { cmd: 'rules' };
 
+  // 搜尋筆記：搜尋 關鍵字1 [關鍵字2 ...]（只打「搜尋」沒有關鍵字 → 用法提示）
+  const sm = text.match(/^(?:搜尋|搜索|查詢|找|search|find)\s+(\S[\s\S]*)$/i);
+  if (sm) return { cmd: 'search', keyword: sm[1].trim() };
+
   // 筆記：第一行是標題（可含 @專案），其餘各行是內文
   const nm = text.match(/^(?:筆記|note)\s+([\s\S]+)$/i);
   if (nm) {
@@ -79,7 +83,7 @@ function parseCommand(rawText, nowMs) {
   const m = text.match(/^(?:新增|add)\s+([\s\S]+)$/i) || text.match(/^[+＋]\s*([\s\S]+)$/);
   if (!m) {
     // 只打了指令關鍵字沒有內容 → 給用法提示；其他認不出的文字 → 讓呼叫端問使用者要當任務還是筆記
-    if (!text || /^(新增|add|筆記|note|[+＋])$/i.test(text)) return { cmd: 'help' };
+    if (!text || /^(新增|add|筆記|note|搜尋|搜索|查詢|找|search|find|[+＋])$/i.test(text)) return { cmd: 'help' };
     return { cmd: 'ask', text };
   }
 
