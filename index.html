@@ -197,7 +197,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/09/18 10:53";
+const BUILD_TIME = "2026/09/21 11:32";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -950,10 +950,14 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
   const [tool, setTool] = useState("pen");
   const [color, setColor] = useState("#ef4444");
   const [width, setWidth] = useState(4);
+  const [eraserSize, setEraserSize] = useState(24);
   const [strokes, setStrokes] = useState((initialStrokes || []).filter(Boolean));
   const [grayscale, setGrayscale] = useState(!!initialGrayscale);
   const drawingRef = useRef(false);
   const cur = useRef(null);
+  const layerRef = useRef(null);   // 筆跡圖層：橡皮擦只擦這層，不會擦到底下的照片
+  const innerRef = useRef(null);
+  const cursorRef = useRef(null);  // 筆刷/橡皮擦範圍圈
   const grayCanvasRef = useRef(null);
   const canvasWrapRef = useRef(null);
   const panStart = useRef(null);
@@ -990,10 +994,14 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
     if (!s || !s.color) return;
     ctx.strokeStyle = s.color; ctx.fillStyle = s.color;
     ctx.lineWidth = s.width; ctx.lineCap = "round"; ctx.lineJoin = "round";
-    if (s.type === "pen") {
-      ctx.beginPath();
-      s.points.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-      ctx.stroke();
+    if (s.type === "pen" || s.type === "erase") {
+      if (s.points.length === 1) {
+        ctx.beginPath(); ctx.arc(s.points[0].x, s.points[0].y, s.width / 2, 0, Math.PI * 2); ctx.fill();
+      } else {
+        ctx.beginPath();
+        s.points.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+        ctx.stroke();
+      }
     } else if (s.type === "rect") {
       ctx.strokeRect(s.x0, s.y0, s.x1 - s.x0, s.y1 - s.y0);
     } else if (s.type === "arrow") {
@@ -1027,8 +1035,18 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
     ctx.clearRect(0, 0, c.width, c.height);
     const base = (grayscale && grayCanvasRef.current) ? grayCanvasRef.current : imgRef.current;
     ctx.drawImage(base, 0, 0, c.width, c.height);
+    // 筆跡先畫在獨立圖層，橡皮擦用 destination-out 只擦圖層上的筆跡，再整層貼到照片上
+    const layer = layerRef.current || (layerRef.current = document.createElement("canvas"));
+    if (layer.width !== c.width || layer.height !== c.height) { layer.width = c.width; layer.height = c.height; }
+    const lctx = layer.getContext("2d");
+    lctx.clearRect(0, 0, layer.width, layer.height);
     const all = cur.current ? [...strokes, cur.current] : strokes;
-    for (const s of all) drawStroke(ctx, s);
+    for (const s of all) {
+      lctx.globalCompositeOperation = s.type === "erase" ? "destination-out" : "source-over";
+      drawStroke(lctx, s);
+    }
+    lctx.globalCompositeOperation = "source-over";
+    ctx.drawImage(layer, 0, 0);
   }, [strokes, grayscale]);
 
   useEffect(() => { redraw(); }, [redraw, imgDims]);
@@ -1042,22 +1060,37 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
     };
   };
 
-  const nearStroke = (s, p) => {
-    if (!s) return false;
-    const d = 12;
-    if (s.type === "pen") return s.points.some((pt) => Math.hypot(pt.x - p.x, pt.y - p.y) < d);
-    if (s.type === "text") return Math.abs(p.x - s.x) < 120 && Math.abs(p.y - s.y) < s.size + 6;
-    const minX = Math.min(s.x0, s.x1) - d, maxX = Math.max(s.x0, s.x1) + d;
-    const minY = Math.min(s.y0, s.y1) - d, maxY = Math.max(s.y0, s.y1) + d;
-    return p.x > minX && p.x < maxX && p.y > minY && p.y < maxY;
+  const hideCursor = () => { if (cursorRef.current) cursorRef.current.style.display = "none"; };
+
+  // 畫筆/橡皮擦的範圍圈：直徑 = 筆寬換算成螢幕像素（會跟著縮放變化）
+  const updateCursor = (e) => {
+    const el = cursorRef.current, c = canvasRef.current, box = innerRef.current;
+    if (!el || !c || !box) return;
+    if (tool !== "pen" && tool !== "erase") { el.style.display = "none"; return; }
+    const t = e.touches ? e.touches[0] : e;
+    if (!t) return;
+    const r = c.getBoundingClientRect(), br = box.getBoundingClientRect();
+    const d = Math.max(4, (tool === "erase" ? eraserSize : width) * r.width / c.width);
+    el.style.width = el.style.height = d + "px";
+    el.style.left = (t.clientX - br.left) + "px";
+    el.style.top = (t.clientY - br.top) + "px";
+    el.style.display = "block";
   };
 
-  const eraseAt = (p) => {
-    setStrokes((curr) => {
-      const hit = [...curr].reverse().find((s) => nearStroke(s, p));
-      return hit ? curr.filter((s) => s.id !== hit.id) : curr;
-    });
-  };
+  useEffect(hideCursor, [tool]);
+
+  // Ctrl+Z / Cmd+Z 復原上一筆。用 capture 階段攔截，避免底下筆記本文的 Ctrl+Z 一起被觸發
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "z") return;
+      const t = e.target;
+      if ((t?.tagName === "INPUT" && t.type !== "range") || t?.tagName === "TEXTAREA" || t?.isContentEditable) return;
+      e.preventDefault(); e.stopPropagation();
+      setStrokes((s) => s.slice(0, -1));
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
 
   const start = (e) => {
     e.preventDefault();
@@ -1079,14 +1112,18 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
     panStart.current = null;
     const p = pos(e);
     if (tool === "text") { setTextInput({ x: p.x, y: p.y, value: "" }); return; }
-    if (tool === "erase") { drawingRef.current = true; eraseAt(p); return; }
     drawingRef.current = true;
-    if (tool === "pen") cur.current = { id: uid(), type: "pen", color, width, points: [p] };
+    if (tool === "pen" || tool === "erase") {
+      cur.current = { id: uid(), type: tool, color: tool === "erase" ? "#000" : color, width: tool === "erase" ? eraserSize : width, points: [p] };
+      updateCursor(e);
+      redraw(); // 單點輕點也要立刻顯示
+    }
     else cur.current = { id: uid(), type: tool, color, width, x0: p.x, y0: p.y, x1: p.x, y1: p.y };
   };
 
   const move = (e) => {
     e.preventDefault();
+    if (e.touches?.length >= 2) hideCursor(); else updateCursor(e);
     if (panStart.current && e.touches?.length >= 2) {
       const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
       const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
@@ -1104,9 +1141,14 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
     }
     if (!drawingRef.current) return;
     const p = pos(e);
-    if (tool === "erase") { eraseAt(p); return; }
     if (!cur.current) return;
     if (tool === "pen") cur.current.points.push(p);
+    else if (tool === "erase") {
+      // 橡皮擦軌跡點距不必太密，省 Firestore 空間；圓頭線條視覺上仍是連續的
+      const pts = cur.current.points, last = pts[pts.length - 1];
+      if (Math.hypot(p.x - last.x, p.y - last.y) < eraserSize / 4) return;
+      pts.push(p);
+    }
     else { cur.current.x1 = p.x; cur.current.y1 = p.y; }
     redraw();
   };
@@ -1115,7 +1157,6 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
     panStart.current = null;
     if (!drawingRef.current) return;
     drawingRef.current = false;
-    if (tool === "erase") return;
     const finished = cur.current;
     cur.current = null;
     if (finished) setStrokes((s) => [...s, finished]);
@@ -1160,8 +1201,11 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
           ...COLORS.map((c) =>
             h('button', { key: c, onClick: () => setColor(c),
               style: { ...S.swatch, background: c, outline: color === c ? "2px solid #fff" : "1px solid #475569", outlineOffset: 2 } })),
-          h('input', { type: "range", min: 2, max: 14, value: width,
-            onChange: (e) => setWidth(+e.target.value), style: { flex: 1 } })
+          tool === "erase"
+            ? h('input', { key: 'erase-size', type: "range", min: 8, max: 80, value: eraserSize, title: `橡皮擦大小 ${eraserSize}`,
+                onChange: (e) => setEraserSize(+e.target.value), style: { flex: 1 } })
+            : h('input', { key: 'pen-size', type: "range", min: 2, max: 14, value: width, title: `筆寬 ${width}`,
+                onChange: (e) => setWidth(+e.target.value), style: { flex: 1 } })
         ),
         h('div', { style: { display: "flex", alignItems: "center", gap: 6 } },
           h('button', { onClick: () => setZoom(z => Math.max(1, +(z-0.25).toFixed(2))), title: '縮小', style: S.toolBtn }, '−'),
@@ -1173,14 +1217,20 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
         )
       ),
       h('div', { ref: canvasWrapRef, style: { ...S.canvasWrap, justifyContent: 'flex-start' } },
-        h('div', { style: { position: "relative", width: zoom <= 1 ? "100%" : Math.round(window.innerWidth * zoom) } },
+        h('div', { ref: innerRef, style: { position: "relative", width: zoom <= 1 ? "100%" : Math.round(window.innerWidth * zoom) } },
           h('canvas', {
             ref: canvasRef, width: imgDims.w, height: imgDims.h,
             style: { width: "100%", display: "block", borderRadius: 8, touchAction: "none",
-              cursor: tool === "text" ? "text" : "crosshair" },
-            onMouseDown: start, onMouseMove: move, onMouseUp: end, onMouseLeave: end,
-            onTouchStart: start, onTouchMove: move, onTouchEnd: end
+              cursor: tool === "text" ? "text" : (tool === "pen" || tool === "erase") ? "none" : "crosshair" },
+            onMouseDown: start, onMouseMove: move, onMouseUp: end, onMouseLeave: () => { end(); hideCursor(); },
+            onTouchStart: start, onTouchMove: move, onTouchEnd: () => { end(); hideCursor(); }
           }),
+          h('div', { ref: cursorRef, style: {
+            position: "absolute", display: "none", pointerEvents: "none", boxSizing: "border-box",
+            borderRadius: "50%", transform: "translate(-50%, -50%)",
+            border: "1px solid #000", boxShadow: "0 0 0 1px rgba(255,255,255,.95)",
+            background: tool === "erase" ? "rgba(255,255,255,.3)" : color + "66"
+          } }),
           textInput && h('input', {
             autoFocus: true, value: textInput.value,
             onChange: (e) => setTextInput({ ...textInput, value: e.target.value }),
