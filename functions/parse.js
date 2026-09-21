@@ -4,6 +4,7 @@ const { taipeiNow, todayStr } = require('./lib');
 
 const pad = (n) => String(n).padStart(2, '0');
 const addDays = (dateStr, n) => new Date(Date.parse(dateStr + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+const DEFAULT_TIME = '03:00';
 const WD = { 日: 0, 天: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6 };
 
 const validDate = (y, m, d) => {
@@ -107,7 +108,7 @@ function parseCommand(rawText, nowMs) {
       const hhmm = taipeiNow(nowMs).toISOString().slice(11, 16);
       d = t <= hhmm ? addDays(today, 1) : today;
     }
-    dueDate = `${d}T${t || '09:00'}`;
+    dueDate = `${d}T${t || DEFAULT_TIME}`; // 只有日期沒時間：凌晨 3 點，確保當天早上 6:00 的彙整一定會列出來
   }
   return { cmd: 'add', title, dueDate, project };
 }
