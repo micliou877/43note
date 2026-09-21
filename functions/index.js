@@ -258,7 +258,7 @@ async function handlePostback(data, params) {
     if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(picked)) return '日期時間格式我看不懂，沒有建立，請再選一次。';
     dueDate = picked;
   } else if (p.get('when') === 'today') dueDate = `${todayStr(Date.now())}T09:00`;
-  else if (p.get('when') === 'tomorrow') dueDate = `${addDays(todayStr(Date.now()), 1)}T09:00`;
+  else if (p.get('when') === 'tomorrow') dueDate = `${addDays(todayStr(Date.now()), 1)}T03:00`; // 凌晨 3 點：明早 6:00 的彙整一定會列出來
   return (await claim(ref)) ? addTask({ ...cmd, dueDate }) : done;
 }
 
