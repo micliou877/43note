@@ -197,7 +197,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/09/21 11:40";
+const BUILD_TIME = "2026/09/21 12:28";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -1135,7 +1135,7 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
         canvasWrapRef.current.scrollLeft = panStart.current.scrollLeft - (midX - panStart.current.midX);
         canvasWrapRef.current.scrollTop = panStart.current.scrollTop - (midY - panStart.current.midY);
       }
-      const newZoom = Math.max(1, Math.min(4, panStart.current.initZoom * (dist / panStart.current.dist)));
+      const newZoom = Math.max(0.25, Math.min(4, panStart.current.initZoom * (dist / panStart.current.dist)));
       setZoom(+(newZoom.toFixed(2)));
       return;
     }
@@ -1208,7 +1208,7 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
                 onChange: (e) => setWidth(+e.target.value), style: { flex: 1 } })
         ),
         h('div', { style: { display: "flex", alignItems: "center", gap: 6 } },
-          h('button', { onClick: () => setZoom(z => Math.max(1, +(z-0.25).toFixed(2))), title: '縮小', style: S.toolBtn }, '−'),
+          h('button', { onClick: () => setZoom(z => Math.max(0.25, +(z-0.25).toFixed(2))), title: '縮小', style: S.toolBtn }, '−'),
           h('span', { style: { color: '#94a3b8', fontSize: 12, minWidth: 42, textAlign: 'center', lineHeight: '36px', userSelect: 'none' } }, `${Math.round(zoom*100)}%`),
           h('button', { onClick: () => setZoom(z => Math.min(4, +(z+0.25).toFixed(2))), title: '放大', style: S.toolBtn }, '+'),
           h('div', { style: { flex: 1 } }),
@@ -1217,7 +1217,7 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
         )
       ),
       h('div', { ref: canvasWrapRef, style: { ...S.canvasWrap, justifyContent: 'flex-start' } },
-        h('div', { ref: innerRef, style: { position: "relative", flexShrink: 0, width: `${Math.round(zoom * 100)}%` } },
+        h('div', { ref: innerRef, style: { position: "relative", flexShrink: 0, margin: "0 auto", width: `${Math.round(zoom * 100)}%` } },
           h('canvas', {
             ref: canvasRef, width: imgDims.w, height: imgDims.h,
             style: { width: "100%", display: "block", borderRadius: 8, touchAction: "none",
