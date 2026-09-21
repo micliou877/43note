@@ -9,7 +9,7 @@ const { defineSecret, defineString } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
 const { todayStr, buildDigest } = require('./lib');
-const { parseCommand } = require('./parse');
+const { parseCommand, addDays } = require('./parse');
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -52,6 +52,7 @@ const RULES_TEXT = [
   '',
   '【不確定的話】',
   '直接打一行文字，我會問你要加入任務還是筆記，點按鈕就好',
+  '選任務時，如果文字裡沒有日期，會再問你要不要設定到期日',
   '',
   '【查詢】',
   '今天：列出今天到期加逾期的任務',
@@ -195,27 +196,70 @@ async function askWhere(text) {
   };
 }
 
-// 使用者點了按鈕
-async function handlePostback(data) {
+// 選了「加入任務」但文字裡沒有日期時間 → 問要不要設定（datetimepicker 會在手機上跳出日期時間滾輪）
+function askDue(id, title) {
+  const now = Date.now();
+  const today = todayStr(now);
+  const btn = (label, when) => ({ type: 'action', action: { type: 'postback', label, data: `act=due&id=${id}&when=${when}`, displayText: label } });
+  return {
+    type: 'text',
+    text: `「${title.length > 40 ? title.slice(0, 40) + '…' : title}」\n要設定到期日嗎？`,
+    quickReply: {
+      items: [
+        // LINE 規定 initial/min 的格式是小寫 t：YYYY-MM-DDtHH:mm
+        { type: 'action', action: { type: 'datetimepicker', label: '📅 選日期時間', data: `act=due&id=${id}`, mode: 'datetime', initial: `${addDays(today, 1)}t09:00`, min: `${today}t00:00` } },
+        btn('今天', 'today'), btn('明天', 'tomorrow'), btn('不設定', 'none'),
+      ],
+    },
+  };
+}
+
+// 認領暫存：先刪除再建立，連按兩次按鈕時只有一次會成功，不會重複建立
+const claim = async (ref) => {
+  try { await ref.delete({ exists: true }); return true; } catch { return false; }
+};
+
+// 使用者點了按鈕（params 是日期時間選擇器回傳的值）
+async function handlePostback(data, params) {
   const p = new URLSearchParams(data || '');
   const act = p.get('act'), id = p.get('id');
-  if (!id || !['task', 'note', 'cancel'].includes(act)) return HELP_TEXT;
+  if (!id || !['task', 'note', 'cancel', 'due'].includes(act)) return HELP_TEXT;
 
   const ref = db.doc(`users/${APP_UID.value()}/lineInbox/${id}`);
   const snap = await ref.get();
   if (!snap.exists) return '這則已經處理過，或超過一天已過期了。';
   const text = snap.data().text;
-  try {
-    await ref.delete({ exists: true }); // 先「認領」再建立：連按兩次按鈕時只有一次會成功，不會重複建立
-  } catch {
-    return '這則已經處理過了。';
-  }
-  if (act === 'cancel') return '已取消，沒有建立任何東西。';
+  const done = '這則已經處理過了。';
 
-  const cmd = parseCommand(act === 'task' ? `新增 ${text}` : `筆記 ${text}`, Date.now());
-  if (cmd.cmd === 'add') return addTask(cmd);
-  if (cmd.cmd === 'note') return addNote(cmd);
-  return '這則沒有可用的標題（只有日期或時間？），沒有建立。';
+  if (act === 'cancel') return (await claim(ref)) ? '已取消，沒有建立任何東西。' : done;
+
+  if (act === 'note') {
+    if (!(await claim(ref))) return done;
+    const cmd = parseCommand(`筆記 ${text}`, Date.now());
+    return cmd.cmd === 'note' ? addNote(cmd) : '這則沒有可用的標題，沒有建立。';
+  }
+
+  const cmd = parseCommand(`新增 ${text}`, Date.now());
+  if (cmd.cmd !== 'add') {
+    await claim(ref);
+    return '這則沒有可用的標題（只有日期或時間？），沒有建立。';
+  }
+
+  if (act === 'task') {
+    // 文字裡已經有日期時間就直接建立；沒有才問。這時候暫存要留著，等使用者選完
+    if (cmd.dueDate) return (await claim(ref)) ? addTask(cmd) : done;
+    return askDue(id, cmd.title);
+  }
+
+  // act === 'due'：日期時間選擇器 / 今天 / 明天 / 不設定
+  let dueDate = null;
+  const picked = (params?.datetime || '').toUpperCase(); // "2026-09-22T15:00"
+  if (picked) {
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(picked)) return '日期時間格式我看不懂，沒有建立，請再選一次。';
+    dueDate = picked;
+  } else if (p.get('when') === 'today') dueDate = `${todayStr(Date.now())}T09:00`;
+  else if (p.get('when') === 'tomorrow') dueDate = `${addDays(todayStr(Date.now()), 1)}T09:00`;
+  return (await claim(ref)) ? addTask({ ...cmd, dueDate }) : done;
 }
 
 async function handleText(text) {
@@ -260,7 +304,7 @@ exports.lineWebhook = onRequest(
           logger.warn('忽略非本人的訊息');
           continue;
         }
-        await replyLine(ev.replyToken, isText ? await handleText(ev.message.text) : await handlePostback(ev.postback?.data));
+        await replyLine(ev.replyToken, isText ? await handleText(ev.message.text) : await handlePostback(ev.postback?.data, ev.postback?.params));
       } catch (err) {
         logger.error('處理 LINE 訊息失敗', { err: String(err) });
       }

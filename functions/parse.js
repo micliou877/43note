@@ -112,4 +112,4 @@ function parseCommand(rawText, nowMs) {
   return { cmd: 'add', title, dueDate, project };
 }
 
-module.exports = { parseCommand, parseDateToken, parseTimeToken };
+module.exports = { parseCommand, parseDateToken, parseTimeToken, addDays };
