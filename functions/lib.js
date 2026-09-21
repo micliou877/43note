@@ -6,6 +6,7 @@ const MAX_TITLE = 60;
 const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
 
 const taipei = (ms) => new Date(ms + TZ_OFFSET_MS);
+const taipeiNow = taipei;
 const todayStr = (ms) => taipei(ms).toISOString().slice(0, 10);
 
 const cutTitle = (t) => {
@@ -42,4 +43,4 @@ function buildDigest(tasks, nowMs) {
   return parts.join('\n');
 }
 
-module.exports = { TZ_OFFSET_MS, todayStr, buildDigest };
+module.exports = { TZ_OFFSET_MS, taipeiNow, todayStr, buildDigest };
