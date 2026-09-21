@@ -41,6 +41,15 @@ const RULES_TEXT = [
   '新增 送件補正 9/25 @行政',
   '→ 放到名稱含「行政」的專案',
   '',
+  '【新增筆記】',
+  '筆記 標題 [@專案]',
+  '（第一行是標題，換行後的都是內文）',
+  '',
+  '範例：',
+  '筆記 現場勘查 9/21',
+  '外牆有裂縫，約 2 公尺',
+  '下週請廠商處理',
+  '',
   '【查詢】',
   '今天：列出今天到期加逾期的任務',
   '',
@@ -64,6 +73,7 @@ const RULES_TEXT = [
 const HELP_TEXT = [
   '看不懂這則訊息 😅',
   '新增任務：新增 標題 明天 15:00',
+  '新增筆記：筆記 標題（換行寫內文）',
   '查清單：今天',
   '完整說明：規則',
 ].join('\n');
@@ -129,10 +139,29 @@ async function resolveProject(query) {
   return { id: DEFAULT_PROJECT_ID, name: DEFAULT_PROJECT };
 }
 
+const escapeHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+// 網頁的筆記內文是 contentEditable 的 HTML：一行一個 <div>，空行是 <div><br></div>
+const textToHtml = (text) => (text ? text.split('\n').map((l) => (l.trim() ? `<div>${escapeHtml(l)}</div>` : '<div><br></div>')).join('') : '');
+
+async function addNote({ title, body, project: projectQuery }) {
+  const project = await resolveProject(projectQuery);
+  if (!project) return `找不到專案「${projectQuery}」，筆記沒有建立。\n（去掉 @專案 會放進「${DEFAULT_PROJECT}」）`;
+
+  // 欄位與網頁 addNote 完全一致（updated 也要有，網頁列表依它排序）
+  await db.collection(`users/${APP_UID.value()}/notes`).add({
+    projectId: project.id, title, body: textToHtml(body), images: [], deleted: false, pinned: false, sortOrder: Date.now(),
+    created: FieldValue.serverTimestamp(), updated: FieldValue.serverTimestamp(),
+  });
+  const lines = body ? body.split('\n').length : 0;
+  return `📝 已加入「${project.name}」\n${title}\n${lines ? `內文 ${lines} 行` : '（只有標題）'}`;
+}
+
 async function handleText(text) {
   const cmd = parseCommand(text, Date.now());
   if (cmd.cmd === 'today') return (await todayDigestText()) || '今天沒有待處理的任務 🎉';
   if (cmd.cmd === 'rules') return RULES_TEXT;
+  if (cmd.cmd === 'note') return addNote(cmd);
   if (cmd.cmd !== 'add') return HELP_TEXT;
 
   const project = await resolveProject(cmd.project);
