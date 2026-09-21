@@ -1,5 +1,5 @@
 // LINE 訊息指令解析（純邏輯，不依賴 Firebase）。
-// 支援：新增 標題 [日期] [時間] [@專案]、今天。日期/時間必須是「以空白隔開的獨立詞」才會被辨識。
+// 支援：新增 標題 [日期] [時間] [@專案]、今天、規則。日期/時間必須是「以空白隔開的獨立詞」才會被辨識。
 const { taipeiNow, todayStr } = require('./lib');
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -60,6 +60,7 @@ function parseTimeToken(tok) {
 function parseCommand(rawText, nowMs) {
   const text = (rawText || '').replace(/\u3000/g, ' ').trim();
   if (/^(今天|今日|清單|list|today)$/i.test(text)) return { cmd: 'today' };
+  if (/^(規則|說明|幫助|help|\?|？)$/i.test(text)) return { cmd: 'rules' };
 
   const m = text.match(/^(?:新增|add)\s+([\s\S]+)$/i) || text.match(/^[+＋]\s*([\s\S]+)$/);
   if (!m) return { cmd: 'help' };

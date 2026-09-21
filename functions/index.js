@@ -1,6 +1,6 @@
 // 43note 的 LINE 整合：
 //   lineDailyDigest  每天早上 6:00 把「今天到期」與「已逾期」還沒完成的任務彙整成一則 LINE 訊息傳給自己
-//   lineWebhook      接收自己傳給官方帳號的訊息，用「新增 標題 明天 15:00」建立任務、「今天」查清單
+//   lineWebhook      接收自己傳給官方帳號的訊息，用「新增 標題 明天 15:00」建立任務、「今天」查清單、「規則」看說明
 // 任務資料結構沿用 index.html：users/{uid}/tasks，欄位 title、dueDate、done、deleted、projectId 等。
 const crypto = require('crypto');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
@@ -23,15 +23,49 @@ const APP_UID = defineString('APP_UID'); // Firebase Auth 的使用者 UID（筆
 const DEFAULT_PROJECT = 'line加入';        // 沒指定專案時，LINE 建立的任務都放這裡
 const DEFAULT_PROJECT_ID = 'line-inbox';   // 固定文件 ID：同時來兩則訊息也不會重複建立專案
 
-const HELP_TEXT = [
-  '可用指令：',
-  '新增 標題 [日期] [時間] [@專案]',
-  '　例：新增 回覆業主圖面 明天 15:00',
-  '　例：新增 送件補正 9/25 @行政',
-  '今天：列出今天到期與逾期的任務',
+// 傳「規則」時回覆的完整說明（LINE 只支援純文字，所以不用表格）
+const RULES_TEXT = [
+  '📖 使用規則',
   '',
-  '日期可用：今天、明天、後天、週三、下週三、9/25',
-  '時間可用：15:00、下午3點、上午10點半',
+  '【新增任務】',
+  '新增 標題 [日期] [時間] [@專案]',
+  '（也可以用 + 代替「新增」）',
+  '',
+  '範例：',
+  '新增 回覆業主圖面',
+  '→ 建立任務，沒有日期',
+  '',
+  '新增 回覆業主圖面 明天 15:00',
+  '→ 有到期日',
+  '',
+  '新增 送件補正 9/25 @行政',
+  '→ 放到名稱含「行政」的專案',
+  '',
+  '【查詢】',
+  '今天：列出今天到期加逾期的任務',
+  '',
+  '【日期寫法】',
+  '今天、明天、後天、週三、下週三、9/25、9月25日、2026/12/31',
+  '',
+  '【時間寫法】',
+  '15:00、下午3點、上午10點半',
+  '',
+  '【規則】',
+  '• 只有日期沒時間：預設 09:00',
+  '• 只有時間沒日期：算今天，時間已過則算明天',
+  `• 沒指定專案：放進「${DEFAULT_PROJECT}」專案（不存在會自動建立）`,
+  '• 日期、時間、@專案 都要用空白隔開',
+  '',
+  '【自動通知】',
+  '每天早上 6:00 傳今日任務彙整',
+].join('\n');
+
+// 看不懂的訊息只回簡短提示
+const HELP_TEXT = [
+  '看不懂這則訊息 😅',
+  '新增任務：新增 標題 明天 15:00',
+  '查清單：今天',
+  '完整說明：規則',
 ].join('\n');
 
 const callLine = async (path, body) => {
@@ -98,6 +132,7 @@ async function resolveProject(query) {
 async function handleText(text) {
   const cmd = parseCommand(text, Date.now());
   if (cmd.cmd === 'today') return (await todayDigestText()) || '今天沒有待處理的任務 🎉';
+  if (cmd.cmd === 'rules') return RULES_TEXT;
   if (cmd.cmd !== 'add') return HELP_TEXT;
 
   const project = await resolveProject(cmd.project);
