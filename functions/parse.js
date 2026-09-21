@@ -76,12 +76,21 @@ function parseCommand(rawText, nowMs) {
   }
 
   const m = text.match(/^(?:新增|add)\s+([\s\S]+)$/i) || text.match(/^[+＋]\s*([\s\S]+)$/);
-  if (!m) return { cmd: 'help' };
+  if (!m) {
+    // 只打了指令關鍵字沒有內容 → 給用法提示；其他認不出的文字 → 讓呼叫端問使用者要當任務還是筆記
+    if (!text || /^(新增|add|筆記|note|[+＋])$/i.test(text)) return { cmd: 'help' };
+    return { cmd: 'ask', text };
+  }
 
   const today = todayStr(nowMs);
   let date = null, time = null, project = null;
   const rest = [];
-  for (const tok of m[1].split(/\s+/)) {
+  // 「明天下午3點」「週三15:00」這種日期加時間連寫的詞，先拆成兩個詞再辨識
+  const tokens = m[1].split(/\s+/).flatMap((tok) => {
+    const j = tok.match(/^(今天|今日|明天|明日|後天|大後天|下?(?:週|周|星期|禮拜)[一二三四五六日天])(.+)$/);
+    return j && parseTimeToken(j[2]) ? [j[1], j[2]] : [tok];
+  });
+  for (const tok of tokens) {
     if (/^[@＠]./.test(tok) && project == null) { project = tok.slice(1); continue; }
     if (date == null) { const d = parseDateToken(tok, today); if (d) { date = d; continue; } }
     if (time == null) { const t = parseTimeToken(tok); if (t) { time = t; continue; } }

@@ -50,6 +50,9 @@ const RULES_TEXT = [
   '外牆有裂縫，約 2 公尺',
   '下週請廠商處理',
   '',
+  '【不確定的話】',
+  '直接打一行文字，我會問你要加入任務還是筆記，點按鈕就好',
+  '',
   '【查詢】',
   '今天：列出今天到期加逾期的任務',
   '',
@@ -88,7 +91,9 @@ const callLine = async (path, body) => {
 };
 const pushLine = (text) => callLine('push', { to: LINE_USER_ID.value().trim(), messages: [{ type: 'text', text }] });
 // 回覆訊息不計入每月推播額度
-const replyLine = (replyToken, text) => callLine('reply', { replyToken, messages: [{ type: 'text', text }] });
+// message 可以是純文字，或完整的 LINE 訊息物件（例如帶快速回覆按鈕的）
+const replyLine = (replyToken, message) =>
+  callLine('reply', { replyToken, messages: [typeof message === 'string' ? { type: 'text', text: message } : message] });
 
 // 今天到期 + 已逾期且未完成的任務。逾期可能是很久以前，所以只設上限；done/deleted 在程式裡濾掉
 async function todayDigestText() {
@@ -157,13 +162,7 @@ async function addNote({ title, body, project: projectQuery }) {
   return `📝 已加入「${project.name}」\n${title}\n${lines ? `內文 ${lines} 行` : '（只有標題）'}`;
 }
 
-async function handleText(text) {
-  const cmd = parseCommand(text, Date.now());
-  if (cmd.cmd === 'today') return (await todayDigestText()) || '今天沒有待處理的任務 🎉';
-  if (cmd.cmd === 'rules') return RULES_TEXT;
-  if (cmd.cmd === 'note') return addNote(cmd);
-  if (cmd.cmd !== 'add') return HELP_TEXT;
-
+async function addTask(cmd) {
   const project = await resolveProject(cmd.project);
   if (!project) return `找不到專案「${cmd.project}」，任務沒有建立。\n（去掉 @專案 會放進「${DEFAULT_PROJECT}」）`;
 
@@ -177,6 +176,56 @@ async function handleText(text) {
     ? `到期：${Number(cmd.dueDate.slice(5, 7))}/${Number(cmd.dueDate.slice(8, 10))} ${cmd.dueDate.slice(11, 16)}`
     : '未設定日期';
   return `✅ 已加入「${project.name}」\n${cmd.title}\n${due}`;
+}
+
+// 認不出是指令的文字：先暫存起來，問使用者要當任務還是筆記（按鈕的 postback 只帶暫存 ID，文字可以很長）
+async function askWhere(text) {
+  const inbox = db.collection(`users/${APP_UID.value()}/lineInbox`);
+  // 順手清掉超過一天沒處理的暫存
+  const old = await inbox.where('created', '<', Date.now() - 24 * 3600 * 1000).limit(20).get();
+  await Promise.all(old.docs.map((d) => d.ref.delete()));
+  const ref = await inbox.add({ text, created: Date.now() });
+
+  const preview = text.replace(/\s*\n\s*/g, ' ⏎ ');
+  const btn = (label, act) => ({ type: 'action', action: { type: 'postback', label, data: `act=${act}&id=${ref.id}`, displayText: label } });
+  return {
+    type: 'text',
+    text: `要把這則加到哪裡？\n「${preview.length > 60 ? preview.slice(0, 60) + '…' : preview}」`,
+    quickReply: { items: [btn('加入任務', 'task'), btn('加入筆記', 'note'), btn('取消', 'cancel')] },
+  };
+}
+
+// 使用者點了按鈕
+async function handlePostback(data) {
+  const p = new URLSearchParams(data || '');
+  const act = p.get('act'), id = p.get('id');
+  if (!id || !['task', 'note', 'cancel'].includes(act)) return HELP_TEXT;
+
+  const ref = db.doc(`users/${APP_UID.value()}/lineInbox/${id}`);
+  const snap = await ref.get();
+  if (!snap.exists) return '這則已經處理過，或超過一天已過期了。';
+  const text = snap.data().text;
+  try {
+    await ref.delete({ exists: true }); // 先「認領」再建立：連按兩次按鈕時只有一次會成功，不會重複建立
+  } catch {
+    return '這則已經處理過了。';
+  }
+  if (act === 'cancel') return '已取消，沒有建立任何東西。';
+
+  const cmd = parseCommand(act === 'task' ? `新增 ${text}` : `筆記 ${text}`, Date.now());
+  if (cmd.cmd === 'add') return addTask(cmd);
+  if (cmd.cmd === 'note') return addNote(cmd);
+  return '這則沒有可用的標題（只有日期或時間？），沒有建立。';
+}
+
+async function handleText(text) {
+  const cmd = parseCommand(text, Date.now());
+  if (cmd.cmd === 'today') return (await todayDigestText()) || '今天沒有待處理的任務 🎉';
+  if (cmd.cmd === 'rules') return RULES_TEXT;
+  if (cmd.cmd === 'note') return addNote(cmd);
+  if (cmd.cmd === 'add') return addTask(cmd);
+  if (cmd.cmd === 'ask') return askWhere(cmd.text);
+  return HELP_TEXT;
 }
 
 const validSignature = (rawBody, signature) => {
@@ -204,13 +253,14 @@ exports.lineWebhook = onRequest(
     }
     for (const ev of req.body?.events || []) {
       try {
-        if (ev.type !== 'message' || ev.message?.type !== 'text') continue;
+        const isText = ev.type === 'message' && ev.message?.type === 'text';
+        if (!isText && ev.type !== 'postback') continue;
         // 只接受本人：別人加了官方帳號為好友也不能建立你的任務
         if (ev.source?.userId !== LINE_USER_ID.value().trim()) {
           logger.warn('忽略非本人的訊息');
           continue;
         }
-        await replyLine(ev.replyToken, await handleText(ev.message.text));
+        await replyLine(ev.replyToken, isText ? await handleText(ev.message.text) : await handlePostback(ev.postback?.data));
       } catch (err) {
         logger.error('處理 LINE 訊息失敗', { err: String(err) });
       }
