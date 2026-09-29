@@ -172,6 +172,7 @@
     "firebase/app": "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js",
     "firebase/auth": "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js",
     "firebase/firestore": "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js",
+    "firebase/storage": "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js",
     "docx": "https://esm.sh/docx@8.5.0"
   }
 }
@@ -183,7 +184,8 @@ import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore, collection, query, orderBy, where, onSnapshot, addDoc, deleteDoc, doc, getDoc, updateDoc, serverTimestamp, writeBatch, getDocs, deleteField, limit } from "firebase/firestore";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore, collection, query, orderBy, where, onSnapshot, addDoc, setDoc, deleteDoc, doc, getDoc, updateDoc, serverTimestamp, writeBatch, getDocs, deleteField, limit } from "firebase/firestore";
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { Document, Paragraph, TextRun, ImageRun, HeadingLevel, Packer, ShadingType, UnderlineType } from "docx";
 
 // ════════════════════════════════════════════════════════════════
@@ -197,7 +199,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/09/29 11:20";
+const BUILD_TIME = "2026/09/29 12:13";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -217,6 +219,24 @@ try {
   }
 }
 const googleProvider = new GoogleAuthProvider();
+const storage = getStorage(app);
+
+// 照片改存 Firebase Storage：Firestore 文件只存下載網址（url）+ 檔案路徑（path，刪除/覆蓋要用）。
+// 舊資料還沒搬過去的，doc 裡只有 dataUrl，沒有 url——所有讀取的地方都要用 `im.url || im.dataUrl`
+// 這種寫法相容兩種格式，不用一次全部搬完。
+async function uploadImageBlob(path, blob) {
+  const r = storageRef(storage, path);
+  await uploadBytes(r, blob, { contentType: blob.type || 'image/jpeg' });
+  return getDownloadURL(r);
+}
+function dataUrlToBlob(dataUrl) {
+  return fetch(dataUrl).then(res => res.blob());
+}
+// 刪除/覆蓋舊檔是收尾動作，失敗不影響主要流程（例如檔案本來就不存在），忽略錯誤即可
+function deleteImagePathQuiet(path) {
+  if (!path) return;
+  deleteObject(storageRef(storage, path)).catch(() => {});
+}
 
 // 手機（尤其是加到主畫面的獨立模式）儲存空間不足時，Firestore 本機快取會進入
 // 無法復原的「已終止」狀態，之後任何操作都會拋出同一個錯誤，只能重新整理頁面復原。
@@ -290,9 +310,13 @@ function compressImage(file) {
   });
 }
 
-function rotateImageData(dataUrl, deg) {
+function rotateImageData(src, deg) {
   return new Promise((resolve, reject) => {
     const img = document.createElement('img');
+    // src 可能是 data: URI（舊資料）或 Firebase Storage 網址（新資料）。
+    // 跨網域來源要設 crossOrigin，不然畫到 canvas 上會被標記為「不透明」，
+    // 沒辦法用 toDataURL 讀出結果（data: URI 本來就同源，這個設定對它沒影響）。
+    img.crossOrigin = 'anonymous';
     img.onload = () => {
       const swap = deg === 90 || deg === 270;
       const canvas = document.createElement('canvas');
@@ -305,7 +329,7 @@ function rotateImageData(dataUrl, deg) {
       resolve(canvas.toDataURL('image/jpeg', JPG_QUALITY));
     };
     img.onerror = () => reject(new Error('旋轉失敗'));
-    img.src = dataUrl;
+    img.src = src;
   });
 }
 
@@ -931,6 +955,7 @@ function renderStrokesScaled(ctx, strokes, ratio) {
 function renderImageToDataUrl(im) {
   return new Promise((resolve) => {
     const img = new Image();
+    img.crossOrigin = 'anonymous'; // 讀 Storage 網址時要設，才能之後 toDataURL
     img.onload = () => {
       const maxW = 1200;
       const scale = Math.min(1, maxW / img.width);
@@ -953,7 +978,7 @@ function renderImageToDataUrl(im) {
       }
       resolve(c.toDataURL('image/jpeg', 0.85));
     };
-    img.src = im.dataUrl;
+    img.src = im.url || im.dataUrl;
   });
 }
 
@@ -980,6 +1005,7 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
 
   useEffect(() => {
     const img = document.createElement("img");
+    img.crossOrigin = 'anonymous'; // 之後要 getImageData 做灰階，讀 Storage 網址時一定要設
     img.onload = () => {
       const maxW = 1400;
       const scale = Math.min(1, maxW / img.width);
@@ -1356,7 +1382,7 @@ function PhotoCropper({ src, onSave, onClose }) {
       ),
       h('div', { style: { ...S.canvasWrap, flex: 1, alignItems: 'center' } },
         h('div', { ref: containerRef, style: { position: 'relative', display: 'inline-block', maxWidth: '100%', maxHeight: '100%', overflow: 'hidden', lineHeight: 0 } },
-          h('img', { ref: imgElRef, src, draggable: false,
+          h('img', { ref: imgElRef, src, draggable: false, crossOrigin: 'anonymous', // 裁切要用 toDataURL 讀出結果，讀 Storage 網址時一定要設
             onLoad: (e) => setNatural({ w: e.target.naturalWidth, h: e.target.naturalHeight }),
             style: { maxWidth: '100%', maxHeight: '80vh', display: 'block', userSelect: 'none' } }),
           natural.w > 0 && h('div', {
@@ -1435,7 +1461,7 @@ function Lightbox({ image, onClose }) {
         }
       }
     };
-    img.src = image.dataUrl;
+    img.src = image.url || image.dataUrl;
   }, [image]);
 
   useEffect(() => {
@@ -1550,8 +1576,22 @@ function ImageCard({ image, index, onAnnotate, onCrop, onDelete, confirmingDelet
         }
       }
     };
-    img.src = image.dataUrl;
-  }, [image.dataUrl, image.strokes, image.grayscale]);
+    img.src = image.url || image.dataUrl;
+  }, [image.url, image.dataUrl, image.strokes, image.grayscale]);
+
+  // Storage 網址是跨網域連結，瀏覽器的 download 屬性對跨網域連結不生效（會直接開新分頁看圖，不會下載）；
+  // data: URI（舊資料）本來就同源，download 屬性有效，但這裡統一用 fetch 轉 blob 下載，兩種來源都能正常存檔。
+  const downloadImage = async () => {
+    try {
+      const resp = await fetch(image.url || image.dataUrl);
+      const blob = await resp.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objUrl; a.download = `note-${index + 1}.jpg`;
+      a.click();
+      URL.revokeObjectURL(objUrl);
+    } catch (err) { alert('下載失敗：' + err.message); }
+  };
 
   return h('div', { style: S.imgCard },
     h('canvas', { ref: canvasRef, style: { ...S.thumb, cursor: 'zoom-in' }, onClick: onView }),
@@ -1560,7 +1600,7 @@ function ImageCard({ image, index, onAnnotate, onCrop, onDelete, confirmingDelet
       h('button', { onClick: onCrop, title: '裁切', style: S.imgActBtn }, '✂'),
       h('button', { onClick: onRotateLeft, title: '向左旋轉', style: S.imgActBtn }, '↺'),
       h('button', { onClick: onRotateRight, title: '向右旋轉', style: S.imgActBtn }, '↻'),
-      h('a', { href: image.dataUrl, download: `note-${index + 1}.jpg`, style: S.imgActBtn }, '⬇'),
+      h('button', { onClick: downloadImage, style: S.imgActBtn }, '⬇'),
       confirmingDelete
         ? h('button', { onClick: onConfirmDelete, style: { ...S.imgActBtn, color: "#ef4444", borderColor: "#fecaca" } }, '確定')
         : h('button', { onClick: onDelete, style: { ...S.imgActBtn, color: "#ef4444" } }, '🗑')
@@ -1677,6 +1717,9 @@ function App() {
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [saveStatus, setSaveStatus] = useState('idle'); // 'idle' | 'unsaved' | 'saving' | 'saved'
   const [backupLoading, setBackupLoading] = useState(false);
+  const [migrateLoading, setMigrateLoading] = useState(false);
+  const [migrateProgress, setMigrateProgress] = useState('');
+  const [cleanupLoading, setCleanupLoading] = useState(false);
   const [calSelectedDate, setCalSelectedDate] = useState(null);
   const [setDueDateTask, setSetDueDateTask] = useState(null);
   const [allTasksMeta, setAllTasksMeta] = useState([]);
@@ -2226,14 +2269,14 @@ function App() {
   const exportToWord = async () => {
     const title = activeNote?.title || '未命名筆記';
 
-    const dataUrlToUint8 = (dataUrl) => {
-      const raw = atob(dataUrl.split(',')[1]);
-      const arr = new Uint8Array(raw.length);
-      for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
-      return arr;
+    // src 可能是 data: URI（舊資料）或 Firebase Storage 網址（新資料）；fetch 兩種都吃，
+    // 用它統一轉成位元組，不用再手動解 base64（Storage 網址本來就沒有 base64 可以解）。
+    const srcToBytes = async (src) => {
+      const blob = await (await fetch(src)).blob();
+      return { data: new Uint8Array(await blob.arrayBuffer()), mime: blob.type || '' };
     };
 
-    const getImgSize = (dataUrl) => new Promise(res => {
+    const getImgSize = (src) => new Promise(res => {
       const img = new Image();
       img.onload = () => {
         const MAX_W = 540;
@@ -2242,23 +2285,21 @@ function App() {
         res({ width: Math.round(w), height: Math.round(w * r) });
       };
       img.onerror = () => res({ width: 400, height: 300 });
-      img.src = dataUrl;
+      img.src = src;
     });
 
-    const getImgType = (dataUrl) => {
-      const m = dataUrl.match(/^data:image\/([^;]+);/);
-      const t = m ? m[1] : 'jpeg';
-      if (t === 'png') return 'png';
-      if (t === 'gif') return 'gif';
-      if (t === 'bmp') return 'bmp';
+    const getImgType = (mime) => {
+      if (mime.includes('png')) return 'png';
+      if (mime.includes('gif')) return 'gif';
+      if (mime.includes('bmp')) return 'bmp';
       return 'jpg';
     };
 
-    const makeImgRun = async (dataUrl) => {
-      const size = await getImgSize(dataUrl);
-      return new ImageRun({ data: dataUrlToUint8(dataUrl), transformation: size, type: getImgType(dataUrl) });
+    const makeImgRun = async (src) => {
+      const [size, { data, mime }] = await Promise.all([getImgSize(src), srcToBytes(src)]);
+      return new ImageRun({ data, transformation: size, type: getImgType(mime) });
     };
-    const makeImgPara = async (dataUrl) => new Paragraph({ children: [await makeImgRun(dataUrl)] });
+    const makeImgPara = async (src) => new Paragraph({ children: [await makeImgRun(src)] });
 
     // rgb(...)/#hex 轉成 docx 需要的 6 碼 hex（不含 #）
     const rgbToHex = (c) => {
@@ -2297,7 +2338,7 @@ function App() {
         if (tag === 'br') { runs.push(new TextRun({ text: '', break: 1 })); return; }
         if (tag === 'img') {
           const src = n.getAttribute('src') || '';
-          if (src.startsWith('data:')) runs.push(await makeImgRun(src));
+          if (src.startsWith('data:') || src.startsWith('http')) runs.push(await makeImgRun(src));
           return;
         }
         const nf = { ...f };
@@ -2379,7 +2420,7 @@ function App() {
       if (node.classList?.contains('page-break')) { paras.push(new Paragraph({ children: [], pageBreakBefore: true })); return; }
       if (tag === 'img') {
         const src = node.getAttribute('src') || '';
-        if (src.startsWith('data:')) paras.push(await makeImgPara(src));
+        if (src.startsWith('data:') || src.startsWith('http')) paras.push(await makeImgPara(src));
         return;
       }
       if (tag === 'br') { paras.push(new Paragraph({})); return; }
@@ -2414,7 +2455,8 @@ function App() {
     for (const node of Array.from(tempDiv.childNodes)) await processBlock(node, undefined);
 
     for (const im of noteImages) {
-      if (im.dataUrl?.startsWith('data:')) paras.push(await makeImgPara(im.dataUrl));
+      const src = im.url || im.dataUrl;
+      if (src) paras.push(await makeImgPara(src));
     }
 
     const docFile = new Document({ sections: [{ properties: {}, children: paras }] });
@@ -2897,6 +2939,16 @@ function App() {
   };
   const imgCol = () => collection(db, `users/${user.uid}/notes/${activeNote.id}/images`);
   const imgDoc = (imgId) => doc(db, `users/${user.uid}/notes/${activeNote.id}/images/${imgId}`);
+  // 內文圖片（貼上／標註／裁切／旋轉）的編輯結果都上傳成 Storage 裡的新檔案，不覆蓋舊檔——
+  // 避免「A 還在讀舊網址時 B 把內容換掉」的競爭問題。舊版本變成沒人參照的孤兒檔案，
+  // 只在使用者明確刪除這張圖片時才清掉（見 deleteInlineImg），編輯過程本身不主動清，
+  // 免得一不小心刪到還在用的原圖，多留著的檔案一個月成本是幾分錢等級，划得來。
+  const uploadInlineEdit = async (noteId, dataUrl) => {
+    const blob = await dataUrlToBlob(dataUrl);
+    const path = `users/${user.uid}/notes/${noteId}/inline/${uid()}.jpg`;
+    const url = await uploadImageBlob(path, blob);
+    return { url, path };
+  };
   const onPickImage = async (e) => {
     const files = Array.from(e.target.files || []);
     e.target.value = "";
@@ -2905,7 +2957,11 @@ function App() {
     try {
       for (const f of files) {
         const dataUrl = await compressImage(f);
-        await addDoc(imgCol(), { dataUrl, strokes: [], grayscale: false, sortOrder: Date.now(), created: serverTimestamp() });
+        const blob = await dataUrlToBlob(dataUrl);
+        const ref = doc(imgCol());
+        const path = `users/${user.uid}/notes/${activeNote.id}/images/${ref.id}.jpg`;
+        const url = await uploadImageBlob(path, blob);
+        await setDoc(ref, { url, path, strokes: [], grayscale: false, sortOrder: Date.now(), created: serverTimestamp() });
       }
       const newCount = noteImages.length + files.length;
       await updateDoc(doc(db, `users/${user.uid}/notes/${activeNote.id}`), { imageCount: newCount, updated: serverTimestamp() });
@@ -2917,10 +2973,14 @@ function App() {
     if (annotating.type === 'inline') {
       const img = bodyRef.current?.querySelector(`img[data-inline="${annotating.imgId}"]`);
       if (img && dataUrl) {
-        if (!img.dataset.original) img.dataset.original = img.src;
-        img.src = dataUrl;
-        img.dataset.strokes = JSON.stringify(strokes || []);
-        updateNoteFields({ body: bodyRef.current.innerHTML });
+        if (!img.dataset.original) img.dataset.original = img.src; // 第一次標註時留一份原圖網址，之後可以重新標註
+        try {
+          const { url, path } = await uploadInlineEdit(activeNote.id, dataUrl);
+          img.src = url;
+          img.dataset.path = path;
+          img.dataset.strokes = JSON.stringify(strokes || []);
+          updateNoteFields({ body: bodyRef.current.innerHTML });
+        } catch (err) { alert('標註儲存失敗，請重試：' + err.message); }
       }
     } else if (annotating.type === 'task') {
       const task = tasks.find(t => t.id === annotating.id);
@@ -2937,11 +2997,15 @@ function App() {
     if (cropping.type === 'inline') {
       const img = bodyRef.current?.querySelector(`img[data-inline="${cropping.imgId}"]`);
       if (img && dataUrl) {
-        img.src = dataUrl;
-        delete img.dataset.original;
-        img.dataset.strokes = '[]';
-        updateNoteFields({ body: bodyRef.current.innerHTML });
-        setSelImg(s => (s && s.imgId === cropping.imgId) ? { ...s, src: dataUrl, rect: img.getBoundingClientRect() } : s);
+        try {
+          const { url, path } = await uploadInlineEdit(activeNote.id, dataUrl);
+          img.src = url;
+          img.dataset.path = path;
+          delete img.dataset.original;
+          img.dataset.strokes = '[]';
+          updateNoteFields({ body: bodyRef.current.innerHTML });
+          setSelImg(s => (s && s.imgId === cropping.imgId) ? { ...s, src: url, rect: img.getBoundingClientRect() } : s);
+        } catch (err) { alert('裁切儲存失敗，請重試：' + err.message); }
       }
     } else if (cropping.type === 'task') {
       const task = tasks.find(t => t.id === cropping.id);
@@ -2949,7 +3013,12 @@ function App() {
       await updateDoc(doc(db, `users/${user.uid}/tasks/${cropping.id}`), { images: newImages });
     } else {
       const img = noteImages[cropping.imgIndex];
-      if (img) await updateDoc(imgDoc(img.id), { dataUrl, strokes: [] });
+      if (img) {
+        try {
+          const { url, path } = await uploadInlineEdit(activeNote.id, dataUrl);
+          await updateDoc(imgDoc(img.id), { url, path, strokes: [], dataUrl: deleteField() });
+        } catch (err) { alert('裁切儲存失敗，請重試：' + err.message); }
+      }
     }
     setCropping(null);
   };
@@ -2964,17 +3033,29 @@ function App() {
   };
   const deleteInlineImg = (imgId) => {
     const img = bodyRef.current?.querySelector(`img[data-inline="${imgId}"]`);
-    if (img) { img.remove(); updateNoteFields({ body: bodyRef.current.innerHTML }); }
+    if (!img) return;
+    if (img.dataset.path) deleteImagePathQuiet(img.dataset.path);
+    if (img.dataset.original) deleteImagePathQuiet(img.dataset.original); // ref() 也吃完整下載網址，不用另外存路徑
+    img.remove();
+    updateNoteFields({ body: bodyRef.current.innerHTML });
   };
   const rotateInlineImg = async (imgId, deg) => {
     const img = bodyRef.current?.querySelector(`img[data-inline="${imgId}"]`);
     if (!img) return;
-    const newSrc = await rotateImageData(img.src, deg);
-    img.src = newSrc;
-    if (img.dataset.original) img.dataset.original = await rotateImageData(img.dataset.original, deg);
-    img.dataset.strokes = '[]';
-    updateNoteFields({ body: bodyRef.current.innerHTML });
-    setSelImg(s => (s && s.imgId === imgId) ? { ...s, src: newSrc, rect: img.getBoundingClientRect() } : s);
+    try {
+      const rotatedDataUrl = await rotateImageData(img.src, deg);
+      const { url, path } = await uploadInlineEdit(activeNote.id, rotatedDataUrl);
+      if (img.dataset.original) {
+        const rotatedOriginal = await rotateImageData(img.dataset.original, deg);
+        const up = await uploadInlineEdit(activeNote.id, rotatedOriginal);
+        img.dataset.original = up.url;
+      }
+      img.src = url;
+      img.dataset.path = path;
+      img.dataset.strokes = '[]';
+      updateNoteFields({ body: bodyRef.current.innerHTML });
+      setSelImg(s => (s && s.imgId === imgId) ? { ...s, src: url, rect: img.getBoundingClientRect() } : s);
+    } catch (err) { alert('旋轉失敗：' + err.message); }
   };
   // 自由擺放模式的圖片（.img-free）用滑鼠拖曳直接改 left/top，不影響文字排列。
   // left/top/width 一律存成「相對於 note-body 容器」的百分比而非固定 px──
@@ -3025,7 +3106,9 @@ function App() {
     document.addEventListener('mouseup', onUp);
   };
   const delImage = async (imgId) => {
+    const img = noteImages.find(im => im.id === imgId);
     await deleteDoc(imgDoc(imgId));
+    if (img?.path) deleteImagePathQuiet(img.path);
     const newCount = Math.max(0, (activeNote.imageCount || noteImages.length) - 1);
     await updateDoc(doc(db, `users/${user.uid}/notes/${activeNote.id}`), { imageCount: newCount });
     updateNoteFields({ imageCount: newCount });
@@ -3035,8 +3118,9 @@ function App() {
     const img = noteImages.find(im => im.id === imgId);
     if (!img) return;
     try {
-      const newDataUrl = await rotateImageData(img.dataUrl, deg);
-      await updateDoc(imgDoc(imgId), { dataUrl: newDataUrl, strokes: [] });
+      const newDataUrl = await rotateImageData(img.url || img.dataUrl, deg);
+      const { url, path } = await uploadInlineEdit(activeNote.id, newDataUrl);
+      await updateDoc(imgDoc(imgId), { url, path, strokes: [], dataUrl: deleteField() });
     } catch (err) { alert('旋轉失敗：' + err.message); }
   };
 
@@ -3343,6 +3427,112 @@ function App() {
       alert(`✅ 還原完成！共新增 ${items.length} 筆資料。`);
     } catch (err) { alert('還原失敗：' + err.message); }
     finally { setBackupLoading(false); }
+  };
+
+  // 把舊照片搬去 Firebase Storage：分兩步驟，先搬、確認新版本沒問題後再清舊資料，
+  // 避免搬一半出錯，或還沒測過新版本就把 Firestore 裡的舊備份刪了回不去。
+  // 內文貼上的圖片是原地把 <img src="data:..."> 換成 Storage 網址（同一個欄位裡的字串
+  // 取代，沒有另外留舊欄位可清，本來就比較安全）；照片庫圖片則是「新增」url/path 欄位，
+  // 舊的 dataUrl 欄位先留著當備份，要另外按下面「清除照片庫舊資料」才會真的刪掉。
+  // 兩邊都用「已經有 url 就跳過」判斷，可以放心重複執行，中斷後再按一次會接著搬沒搬完的。
+  const migrateToStorage = async () => {
+    if (!window.confirm(
+      '這會掃描你所有的筆記，把還沒搬過去的照片上傳到 Firebase Storage。\n\n' +
+      '筆記數量多的話可能要跑一段時間，過程中請不要關閉分頁；中途中斷也沒關係，再按一次會接著搬。\n\n' +
+      '照片庫的舊資料現在不會刪除，內文貼上的圖片會直接換成新網址。確定開始嗎？'
+    )) return;
+    setMigrateLoading(true);
+    let inlineDone = 0, galleryDone = 0, failCount = 0;
+    try {
+      const noteSnap = await getDocs(collection(db, `users/${user.uid}/notes`));
+      const notes = noteSnap.docs;
+      let noteCount = 0;
+      for (const nDoc of notes) {
+        noteCount++;
+        setMigrateProgress(`處理筆記 ${noteCount}/${notes.length}…`);
+        const noteId = nDoc.id;
+        const noteData = nDoc.data();
+
+        if (noteData.body && noteData.body.includes('data:image')) {
+          const tempDiv = document.createElement('div');
+          tempDiv.innerHTML = noteData.body;
+          // src 是目前顯示的圖片；data-original 是曾經用「標註」功能留的原圖備份，
+          // 舊版是直接把整段 base64 存成 HTML 屬性，這兩種都要找出來搬
+          const imgs = Array.from(tempDiv.querySelectorAll('img[src^="data:"], img[data-original^="data:"]'));
+          let changed = false;
+          for (const img of imgs) {
+            if (img.getAttribute('data-original')?.startsWith('data:')) {
+              try {
+                const blob = await dataUrlToBlob(img.getAttribute('data-original'));
+                const path = `users/${user.uid}/notes/${noteId}/inline/${uid()}.jpg`;
+                const url = await uploadImageBlob(path, blob);
+                img.setAttribute('data-original', url);
+                changed = true;
+                inlineDone++;
+              } catch (err) { failCount++; }
+            }
+            if (!img.getAttribute('src')?.startsWith('data:')) continue;
+            try {
+              const blob = await dataUrlToBlob(img.getAttribute('src'));
+              const path = `users/${user.uid}/notes/${noteId}/inline/${uid()}.jpg`;
+              const url = await uploadImageBlob(path, blob);
+              img.setAttribute('src', url);
+              img.dataset.path = path;
+              changed = true;
+              inlineDone++;
+            } catch (err) { failCount++; }
+          }
+          if (changed) await updateDoc(doc(db, `users/${user.uid}/notes/${noteId}`), { body: tempDiv.innerHTML });
+        }
+
+        const imgSnap = await getDocs(collection(db, `users/${user.uid}/notes/${noteId}/images`));
+        for (const imDoc of imgSnap.docs) {
+          const im = imDoc.data();
+          if (im.url || !im.dataUrl) continue; // 已經搬過，或本來就沒有舊資料
+          try {
+            const blob = await dataUrlToBlob(im.dataUrl);
+            const path = `users/${user.uid}/notes/${noteId}/images/${imDoc.id}.jpg`;
+            const url = await uploadImageBlob(path, blob);
+            await updateDoc(imDoc.ref, { url, path });
+            galleryDone++;
+          } catch (err) { failCount++; }
+        }
+      }
+      alert(
+        `✅ 搬移完成！\n\n內文圖片：${inlineDone} 張\n照片庫圖片：${galleryDone} 張\n` +
+        (failCount ? `⚠️ 有 ${failCount} 張搬移失敗（可能是網路問題），可以再按一次重試，已經搬過的不會重複上傳。` : '全部成功。')
+      );
+    } catch (err) {
+      alert('搬移過程發生錯誤：' + err.message + '\n\n已經搬移成功的部分不會遺失，可以再按一次繼續。');
+    } finally {
+      setMigrateLoading(false);
+      setMigrateProgress('');
+    }
+  };
+
+  const cleanupOldImageData = async () => {
+    if (!window.confirm(
+      '⚠️ 這會永久刪除 Firestore 裡照片庫的舊照片備份資料（dataUrl 欄位）。\n\n' +
+      '請先確認：已經按過「搬移照片到 Storage」，而且用新版本測過照片都能正常顯示、標註、裁切、旋轉，' +
+      '沒有問題才可以繼續，之後沒辦法復原。確定要清除嗎？'
+    )) return;
+    setCleanupLoading(true);
+    let cleaned = 0;
+    try {
+      const noteSnap = await getDocs(collection(db, `users/${user.uid}/notes`));
+      for (const nDoc of noteSnap.docs) {
+        const imgSnap = await getDocs(collection(db, `users/${user.uid}/notes/${nDoc.id}/images`));
+        for (const imDoc of imgSnap.docs) {
+          const im = imDoc.data();
+          if (im.url && im.dataUrl) { await updateDoc(imDoc.ref, { dataUrl: deleteField() }); cleaned++; }
+        }
+      }
+      alert(`✅ 已清除 ${cleaned} 張照片的舊資料。`);
+    } catch (err) {
+      alert('清除過程發生錯誤：' + err.message);
+    } finally {
+      setCleanupLoading(false);
+    }
   };
 
   doAutoSaveRef.current = async () => {
@@ -3861,6 +4051,20 @@ function App() {
         )
       );
     })(),
+    h('div', { style: { borderTop: '1px solid #f1f5f9', paddingTop: 8, marginTop: 4 } },
+      h('div', { style: { fontSize: 10.5, color: '#94a3b8', marginBottom: 4 } }, '照片改存 Storage（測試中）'),
+      h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4 } },
+        h('button', {
+          onClick: migrateToStorage, disabled: migrateLoading || cleanupLoading,
+          style: { fontSize: 11.5, padding: '6px 4px', background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', borderRadius: 6, cursor: migrateLoading ? 'default' : 'pointer', opacity: migrateLoading ? 0.6 : 1 }
+        }, migrateLoading ? (migrateProgress || '搬移中…') : '🗄️ 搬移照片到 Storage'),
+        h('button', {
+          onClick: cleanupOldImageData, disabled: migrateLoading || cleanupLoading,
+          title: '先確定用過上面的搬移、也測過照片都正常，才按這個',
+          style: { fontSize: 11.5, padding: '6px 4px', background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', borderRadius: 6, cursor: cleanupLoading ? 'default' : 'pointer', opacity: cleanupLoading ? 0.6 : 1 }
+        }, cleanupLoading ? '清除中…' : '🧹 清除照片庫舊資料')
+      )
+    ),
     h('div', { style: S.userBar },
       h('div', { style: S.userInfo },
         user.photoURL && h('img', { src: user.photoURL, alt: '', style: S.avatar, referrerPolicy: 'no-referrer' }),
@@ -4798,44 +5002,59 @@ function App() {
                   if (imgItem) {
                     e.preventDefault();
                     const file = imgItem.getAsFile();
-                    if (!file) return;
+                    const noteId = activeNote?.id;
+                    if (!file || !noteId) return;
                     const sel0 = window.getSelection();
                     const savedRange = sel0 && sel0.rangeCount > 0 ? sel0.getRangeAt(0).cloneRange() : null;
                     const reader = new FileReader();
                     reader.onload = (ev) => {
                       const tmp = document.createElement('img');
-                      tmp.onload = () => {
+                      tmp.onload = async () => {
                         const MAX = 900;
                         const scale = Math.min(1, MAX / Math.max(tmp.width, tmp.height));
                         const w = Math.round(tmp.width * scale), h = Math.round(tmp.height * scale);
                         const c = document.createElement('canvas');
                         c.width = w; c.height = h;
                         c.getContext('2d').drawImage(tmp, 0, 0, w, h);
-                        let q = 0.85, dataUrl;
-                        do { dataUrl = c.toDataURL('image/jpeg', q); q = Math.round((q - 0.1) * 10) / 10; }
-                        while (dataUrl.length > 350000 && q >= 0.3);
+                        const dataUrl = c.toDataURL('image/jpeg', 0.85);
                         const id = uid();
-                        const img = document.createElement('img');
-                        img.dataset.inline = id;
-                        img.src = dataUrl;
-                        const body = bodyRef.current;
-                        if (body) {
-                          body.focus();
-                          const sel = window.getSelection();
-                          let range = (savedRange && body.contains(savedRange.startContainer)) ? savedRange : null;
-                          if (!range) {
-                            range = document.createRange();
-                            range.selectNodeContents(body);
-                            range.collapse(false);
+                        // 直接存 Storage，筆記內文只存網址，不會再把大張 base64 塞進 Firestore 文件
+                        // （這就是「筆記只有一張圖就變亂碼」「筆記超過 1MB 存不進去」的根本原因）。
+                        // 先上傳成功拿到網址，才把 <img> 插進畫面──上傳完成前使用者若切走筆記或
+                        // 中途繼續打字，都不會有半殘的內容被存進去。
+                        setUploading(true);
+                        try {
+                          const blob = await dataUrlToBlob(dataUrl);
+                          const path = `users/${user.uid}/notes/${noteId}/inline/${id}.jpg`;
+                          const url = await uploadImageBlob(path, blob);
+                          if (activeNoteRef.current?.id !== noteId) return; // 上傳這段期間切走了筆記，不要插進錯的畫面
+                          const img = document.createElement('img');
+                          img.dataset.inline = id;
+                          img.dataset.path = path;
+                          img.src = url;
+                          const body = bodyRef.current;
+                          if (body) {
+                            body.focus();
+                            const sel = window.getSelection();
+                            let range = (savedRange && body.contains(savedRange.startContainer)) ? savedRange : null;
+                            if (!range) {
+                              range = document.createRange();
+                              range.selectNodeContents(body);
+                              range.collapse(false);
+                            }
+                            range.deleteContents();
+                            range.insertNode(img);
+                            range.setStartAfter(img);
+                            range.setEndAfter(img);
+                            sel.removeAllRanges();
+                            sel.addRange(range);
                           }
-                          range.deleteContents();
-                          range.insertNode(img);
-                          range.setStartAfter(img);
-                          range.setEndAfter(img);
-                          sel.removeAllRanges();
-                          sel.addRange(range);
+                          updateNoteFields({ body: bodyRef.current?.innerHTML || '' });
+                        } catch (err) {
+                          alert('圖片上傳失敗，請重新貼上一次：' + err.message);
+                        } finally {
+                          setUploading(false);
                         }
-                        updateNoteFields({ body: bodyRef.current?.innerHTML || '' });
                       };
                       tmp.src = ev.target.result;
                     };
@@ -4940,7 +5159,7 @@ function App() {
                 h(ImageCard, { key: im.id, image: im, index: i,
                   onView: () => setLightbox(im),
                   onAnnotate: () => setAnnotating({ type: 'note', imgIndex: i }),
-                  onCrop: () => setCropping({ type: 'note', imgIndex: i, src: im.dataUrl }),
+                  onCrop: () => setCropping({ type: 'note', imgIndex: i, src: im.url || im.dataUrl }),
                   onDelete: () => setConfirmDel({ type: "image", id: im.id }),
                   confirmingDelete: confirmDel?.type === "image" && confirmDel.id === im.id,
                   onConfirmDelete: () => delImage(im.id),
@@ -5053,7 +5272,7 @@ function App() {
         ? tasks.find(t => t.id === annotating.id)?.images[annotating.imgIndex]
         : noteImages[annotating.imgIndex];
       return im ? h(PhotoAnnotator, {
-        src: im.dataUrl, initialStrokes: im.strokes || [], initialGrayscale: !!im.grayscale,
+        src: im.url || im.dataUrl, initialStrokes: im.strokes || [], initialGrayscale: !!im.grayscale,
         onSave: saveAnnotation, onClose: () => setAnnotating(null)
       }) : null;
     })(),
