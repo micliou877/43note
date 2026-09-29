@@ -97,9 +97,12 @@ const callLine = async (path, body) => {
 };
 const pushLine = (text) => callLine('push', { to: LINE_USER_ID.value().trim(), messages: [{ type: 'text', text }] });
 // 回覆訊息不計入每月推播額度
-// message 可以是純文字，或完整的 LINE 訊息物件（例如帶快速回覆按鈕的）
+// message 可以是純文字、完整的 LINE 訊息物件（例如帶快速回覆按鈕的），或它們的陣列（一次回覆最多 5 則）
 const replyLine = (replyToken, message) =>
-  callLine('reply', { replyToken, messages: [typeof message === 'string' ? { type: 'text', text: message } : message] });
+  callLine('reply', {
+    replyToken,
+    messages: [].concat(message).map((m) => (typeof m === 'string' ? { type: 'text', text: m } : m)),
+  });
 
 // 今天到期 + 已逾期且未完成的任務。逾期可能是很久以前，所以只設上限；done/deleted 在程式裡濾掉
 async function todayDigestText() {

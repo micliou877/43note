@@ -54,10 +54,11 @@ const htmlToText = (html) =>
     .trim();
 
 const SNIPPET_RADIUS = 20;
-const MAX_RESULTS = 8;
+const MSG_LIMIT = 4500;   // LINE 單則文字上限 5000 字，留一點餘裕
+const MAX_MESSAGES = 5;   // LINE 一次回覆最多 5 則訊息
 
 // 在筆記標題＋內文裡找關鍵字（多個關鍵字用空白隔開，必須全部出現；不分大小寫）
-// notes: [{ title, body(HTML), projectName, updatedMs }]；回傳要傳給 LINE 的文字
+// notes: [{ title, body(HTML), projectName, updatedMs }]；回傳要傳給 LINE 的文字陣列（結果太長時拆成多則）
 function buildSearchResult(notes, keywordText) {
   const keywords = keywordText.toLowerCase().split(/\s+/).filter(Boolean);
   const hits = [];
@@ -79,16 +80,26 @@ function buildSearchResult(notes, keywordText) {
     }
     hits.push({ title: title || '(無標題)', project: n.projectName, snippet, updatedMs: n.updatedMs || 0 });
   }
-  if (!hits.length) return `找不到包含「${keywords.join(' ')}」的筆記`;
+  if (!hits.length) return [`找不到包含「${keywords.join(' ')}」的筆記`];
 
   hits.sort((a, b) => b.updatedMs - a.updatedMs);
-  const parts = [`🔍 「${keywords.join(' ')}」找到 ${hits.length} 則筆記`];
-  for (const h of hits.slice(0, MAX_RESULTS)) {
-    parts.push('', `📝 ${cutTitle(h.title)}`, `　專案：${h.project || '(未分類)'}`);
-    if (h.snippet) parts.push(`　${h.snippet}`);
+  // 每則筆記一個區塊，依長度湊滿一則訊息就換下一則
+  const blocks = hits.map((h) => {
+    const lines = ['', '', `📝 ${cutTitle(h.title)}`, `　專案：${h.project || '(未分類)'}`];
+    if (h.snippet) lines.push(`　${h.snippet}`);
+    return lines.join('\n');
+  });
+  const messages = [`🔍 「${keywords.join(' ')}」找到 ${hits.length} 則筆記`];
+  let shown = 0;
+  for (const b of blocks) {
+    if (messages[messages.length - 1].length + b.length > MSG_LIMIT) {
+      if (messages.length === MAX_MESSAGES) break;
+      messages.push(b.trimStart());
+    } else messages[messages.length - 1] += b;
+    shown++;
   }
-  if (hits.length > MAX_RESULTS) parts.push('', `…另有 ${hits.length - MAX_RESULTS} 則，請加上更多關鍵字縮小範圍`);
-  return parts.join('\n');
+  if (shown < hits.length) messages[messages.length - 1] += `\n\n…另有 ${hits.length - shown} 則沒列出，請加上更多關鍵字縮小範圍`;
+  return messages;
 }
 
 module.exports = { TZ_OFFSET_MS, taipeiNow, todayStr, buildDigest, htmlToText, buildSearchResult };

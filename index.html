@@ -197,7 +197,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/09/22 07:57";
+const BUILD_TIME = "2026/09/29 11:20";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -309,9 +309,22 @@ function rotateImageData(dataUrl, deg) {
   });
 }
 
+const BODY_TAG_WHITELIST = /<(br|p|div|b|i|u|s|span|ul|ol|li|strong|em|blockquote|img|mark)\b/i;
+
 function toBodyHtml(body) {
   if (!body) return '';
-  if (/<(br|p|div|b|i|u|s|span|ul|ol|li|strong|em|blockquote)\b/i.test(body)) return body;
+  if (BODY_TAG_WHITELIST.test(body)) return body;
+  // 舊版判斷「這段是不是已經是 HTML」的標籤清單漏了 <img>：筆記如果只有一張圖、
+  // 沒有其他 br/div 包著（例如貼上圖片就是內容的第一個東西），整段會被誤判成純文字
+  // 整個跳脫，畫面上就會看到 &lt;img data-inline=...&gt; 這種亂碼。之後每次編輯存檔
+  // 又會再跳脫一次，越疊越多層。這裡嘗試反覆解跳脫，能認出標籤就當作救回來了。
+  let decoded = body;
+  for (let i = 0; i < 5; i++) {
+    const next = decoded.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+    if (next === decoded) break;
+    decoded = next;
+    if (BODY_TAG_WHITELIST.test(decoded)) return decoded;
+  }
   return body
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/\n/g, '<br>');
