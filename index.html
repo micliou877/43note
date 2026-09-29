@@ -199,7 +199,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/09/29 12:13";
+const BUILD_TIME = "2026/09/29 14:39";
 const MAX_IMG_WIDTH = 1000;
 const JPG_QUALITY = 0.7;
 
@@ -3117,6 +3117,10 @@ function App() {
   const rotateImage = async (imgId, deg) => {
     const img = noteImages.find(im => im.id === imgId);
     if (!img) return;
+    // 標註座標是照原本方向記錄的，旋轉後方向變了、座標會對不上，所以旋轉一定會清空標註。
+    // 這是舊有的既定行為（沒辦法自動把標註轉到新方向），先跳出警告避免使用者沒注意到就
+    // 把辛苦畫的標註洗掉。
+    if (img.strokes?.length && !window.confirm('這張照片已經有標註，旋轉會清除目前的標註（無法保留），確定要繼續嗎？')) return;
     try {
       const newDataUrl = await rotateImageData(img.url || img.dataUrl, deg);
       const { url, path } = await uploadInlineEdit(activeNote.id, newDataUrl);
@@ -3148,6 +3152,8 @@ function App() {
     try {
       const task = tasks.find(t => t.id === taskId);
       if (!task) return;
+      // 跟筆記照片庫一樣：標註座標對不上旋轉後的方向，旋轉一定會清空標註，先警告一下
+      if (task.images[imgIndex]?.strokes?.length && !window.confirm('這張照片已經有標註，旋轉會清除目前的標註（無法保留），確定要繼續嗎？')) return;
       const newDataUrl = await rotateImageData(task.images[imgIndex].dataUrl, deg);
       const newImages = task.images.map((im, i) => i === imgIndex ? { ...im, dataUrl: newDataUrl, strokes: [] } : im);
       await updateDoc(doc(db, `users/${user.uid}/tasks/${taskId}`), { images: newImages });
