@@ -199,7 +199,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/09/29 15:05";
+const BUILD_TIME = "2026/10/01 08:58";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -2006,8 +2006,12 @@ function App() {
       if (!overdueAlertShownRef.current) {
         overdueAlertShownRef.current = true;
         const now = new Date();
-        const overdue = list.filter(t => !t.done && !t.deleted && t.dueDate && new Date(t.dueDate) < now);
-        if (overdue.length > 0) setOverdueModal(overdue);
+        const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        // 逾期 + 今天到期（還沒到時間也算），依到期時間排序，最急的排最前面
+        const relevant = list
+          .filter(t => !t.done && !t.deleted && t.dueDate && new Date(t.dueDate) <= todayEnd)
+          .sort((a, b) => a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0);
+        if (relevant.length > 0) setOverdueModal(relevant);
       }
     });
   }, [user]);
@@ -3584,10 +3588,17 @@ function App() {
     style: { position: 'fixed', top: 0, left: 0, right: 0, background: '#fef3c7', color: '#92400e', padding: '6px 14px', fontSize: 12.5, textAlign: 'center', zIndex: 300, borderBottom: '1px solid #fde68a' }
   }, '📵 離線模式 — 讀寫正常，資料已存本機，恢復連線後自動同步');
 
-  const overdueModalEl = overdueModal && h('div', { style: { ...S.modalOverlay, zIndex: 600 } },
+  const overdueModalEl = overdueModal && (() => {
+    const now = new Date();
+    const overdueCount = overdueModal.filter(t => new Date(t.dueDate) < now).length;
+    const todayCount = overdueModal.length - overdueCount;
+    const parts = [];
+    if (overdueCount) parts.push(`${overdueCount} 個已逾期`);
+    if (todayCount) parts.push(`${todayCount} 個今天到期`);
+    return h('div', { style: { ...S.modalOverlay, zIndex: 600 } },
     h('div', { style: { ...S.modalCard, maxWidth: 460, display: 'flex', flexDirection: 'column', maxHeight: '80vh' } },
-      h('h3', { style: { ...S.modalTitle, color: '#dc2626', marginBottom: 4 } }, '⏰ 逾期任務提醒'),
-      h('p', { style: S.modalSub }, `有 ${overdueModal.length} 個任務已逾期尚未完成：`),
+      h('h3', { style: { ...S.modalTitle, color: '#dc2626', marginBottom: 4 } }, '⏰ 任務提醒'),
+      h('p', { style: S.modalSub }, `有 ${parts.join('、')}尚未完成：`),
       h('div', { style: { overflowY: 'auto', flex: 1, maxHeight: 320, border: '1px solid #fee2e2', borderRadius: 8, marginBottom: 16 } },
         overdueModal.map(t => {
           const due = fmtDue(t.dueDate);
@@ -3599,7 +3610,7 @@ function App() {
               h('div', { style: { fontSize: 13.5, color: '#1f2937', fontWeight: 500, lineHeight: 1.4 } }, t.title),
               h('div', { style: { fontSize: 11, color: '#94a3b8', marginTop: 3, display: 'flex', gap: 6, flexWrap: 'wrap' } },
                 projName && h('span', null, `📁 ${projName}`),
-                h('span', { style: { color: '#dc2626', fontWeight: 500 } }, due?.text || t.dueDate)
+                h('span', { style: { color: due?.color || '#dc2626', fontWeight: 500 } }, due?.text || t.dueDate)
               ),
               t.remark && h('div', { style: { fontSize: 11.5, color: '#78716c', marginTop: 3, wordBreak: 'break-word', whiteSpace: 'pre-wrap' } }, `💬 ${t.remark}`),
               t.noteIds?.length > 0 && h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 } },
@@ -3642,7 +3653,8 @@ function App() {
         }, '查看所有任務 →')
       )
     )
-  );
+    );
+  })();
 
   // 排序優先順序：釘選 > 拖曳自訂順序(sortOrder) > 預設排序
   const byOrder = (a, b) => {
