@@ -199,7 +199,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/10/01 08:58";
+const BUILD_TIME = "2026/10/12 11:04";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -1699,6 +1699,8 @@ function App() {
   const [annotating, setAnnotating] = useState(null);
   const [cropping, setCropping] = useState(null);
   const [selImg, setSelImg] = useState(null); // { imgId, src, rect } for inline image selection
+  // 剪下/複製的圖片暫存在這裡（App 層級的 state，切換筆記也不會不見），才能「剪下 → 換一篇筆記 → 貼上」
+  const [imgClipboard, setImgClipboard] = useState(null); // { mode:'cut'|'copy', fromNoteId, src, path, strokes, original }
   const [search, setSearch] = useState("");
   const [creatingProj, setCreatingProj] = useState(false);
   const [confirmDel, setConfirmDel] = useState(null);
@@ -3066,6 +3068,69 @@ function App() {
       updateNoteFields({ body: bodyRef.current.innerHTML });
       setSelImg(s => (s && s.imgId === imgId) ? { ...s, src: url, rect: img.getBoundingClientRect() } : s);
     } catch (err) { alert('旋轉失敗：' + err.message); }
+  };
+  // 剪下：從目前位置移除，記在 imgClipboard 裡（不刪 Storage 檔案，因為等一下貼上還要用）。
+  // 貼到同一篇筆記就直接重用原本的網址；貼到別篇筆記才真的搬檔案過去（見 pasteInlineImg）。
+  const cutInlineImg = (imgId) => {
+    const img = bodyRef.current?.querySelector(`img[data-inline="${imgId}"]`);
+    if (!img || !activeNote?.id) return;
+    setImgClipboard({
+      mode: 'cut', fromNoteId: activeNote.id,
+      src: img.src, path: img.dataset.path || '', strokes: img.dataset.strokes || '', original: img.dataset.original || '',
+    });
+    img.remove();
+    updateNoteFields({ body: bodyRef.current.innerHTML });
+    clearSelImg();
+  };
+  // 複製：原地保留，記下來源給貼上用。真正複製檔案的動作留到貼上那一刻才做
+  // （這樣才知道要複製到哪篇筆記底下，路徑才歸類得對），可以貼很多次。
+  const copyInlineImg = (imgId) => {
+    const img = bodyRef.current?.querySelector(`img[data-inline="${imgId}"]`);
+    if (!img) return;
+    setImgClipboard({ mode: 'copy', src: img.src, strokes: img.dataset.strokes || '', original: img.dataset.original || '' });
+    clearSelImg();
+  };
+  const pasteInlineImg = async () => {
+    const body = bodyRef.current;
+    if (!imgClipboard || !activeNote?.id || !body) return;
+    const sel = window.getSelection();
+    let range = (sel && sel.rangeCount > 0 && body.contains(sel.getRangeAt(0).startContainer)) ? sel.getRangeAt(0).cloneRange() : null;
+    if (!range) { range = document.createRange(); range.selectNodeContents(body); range.collapse(false); }
+
+    setUploading(true);
+    try {
+      let url = imgClipboard.src, path = imgClipboard.path || '';
+      // 複製的圖片、或剪下後貼到「別篇」筆記：都要真的複製一份檔案到目前這篇筆記底下，
+      // 不能共用同一個 Storage 檔案──不然以後任一邊刪除圖片，會把另一邊也弄壞。
+      // 剪下後貼回「同一篇」筆記，直接重用原本的網址就好，不用多傳一次。
+      const needsCopy = imgClipboard.mode === 'copy' || imgClipboard.fromNoteId !== activeNote.id;
+      if (needsCopy) {
+        const blob = await (await fetch(imgClipboard.src)).blob();
+        const newPath = `users/${user.uid}/notes/${activeNote.id}/inline/${uid()}.jpg`;
+        url = await uploadImageBlob(newPath, blob);
+        if (imgClipboard.mode === 'cut' && imgClipboard.path) deleteImagePathQuiet(imgClipboard.path); // 真的搬家了，舊檔案可以刪
+        path = newPath;
+      }
+      const img = document.createElement('img');
+      img.dataset.inline = uid();
+      if (path) img.dataset.path = path;
+      if (imgClipboard.original) img.dataset.original = imgClipboard.original;
+      if (imgClipboard.strokes) img.dataset.strokes = imgClipboard.strokes;
+      img.src = url;
+      body.focus();
+      range.deleteContents();
+      range.insertNode(img);
+      range.setStartAfter(img);
+      range.setEndAfter(img);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      updateNoteFields({ body: body.innerHTML });
+      if (imgClipboard.mode === 'cut') setImgClipboard(null); // 剪下是搬移，貼過一次就沒了
+    } catch (err) {
+      alert('貼上圖片失敗：' + err.message);
+    } finally {
+      setUploading(false);
+    }
   };
   // 自由擺放模式的圖片（.img-free）用滑鼠拖曳直接改 left/top，不影響文字排列。
   // left/top/width 一律存成「相對於 note-body 容器」的百分比而非固定 px──
@@ -4824,6 +4889,11 @@ function App() {
                   uploading ? '處理中…' : '📷 加照片',
                   h('input', { type: 'file', accept: 'image/*', multiple: true, onChange: onPickImage, style: { display: 'none' } })
                 ),
+                // 剪下/複製圖片後，不管切到哪篇筆記都看得到這個按鈕，點一下貼到目前游標位置
+                imgClipboard && h('button', {
+                  onClick: pasteInlineImg, disabled: uploading, title: imgClipboard.mode === 'cut' ? '貼上剛剛剪下的圖片' : '貼上剛剛複製的圖片',
+                  style: { ...S.ghostBtn, color: '#2563eb', opacity: uploading ? 0.5 : 1 }
+                }, `📋 貼上圖片${imgClipboard.mode === 'cut' ? '（剪下）' : '（複製）'}`),
                 h('button', { onClick: () => setCaseTagNote(activeNote), title: '標籤相關案件',
                   style: { ...S.ghostBtn, color: activeNote.tags?.length ? '#2563eb' : undefined } },
                   `🏷️ 標籤${activeNote.tags?.length ? ` (${activeNote.tags.length})` : ''}`),
@@ -5278,6 +5348,9 @@ function App() {
               setAnnotating({ type: 'inline', imgId: selImg.imgId, src: img?.dataset.original || selImg.src, strokes });
               clearSelImg();
             } }, '✏️ 標注'),
+          h('div', { style: { width: 1, background: '#4b5563', margin: '4px 2px', alignSelf: 'stretch' } }),
+          h('button', { style: btnStyle, title: '剪下（可以貼到別篇筆記）', onClick: () => cutInlineImg(selImg.imgId) }, '✄ 剪下'),
+          h('button', { style: btnStyle, title: '複製（可以貼到別篇筆記）', onClick: () => copyInlineImg(selImg.imgId) }, '⧉ 複製'),
           h('button', { style: { ...btnStyle, color: '#fca5a5' },
             onClick: () => { deleteInlineImg(selImg.imgId); clearSelImg(); } }, '🗑'),
         ),
