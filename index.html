@@ -114,6 +114,7 @@
   .note-body img[data-inline] { max-width: 100%; border-radius: 6px; cursor: pointer; display: block; margin: 6px 0; }
   .note-body img[data-inline]:hover { outline: 2px solid #0d9488; }
   .note-body img[data-inline].img-sel { outline: 2px solid #0d9488; }
+  .note-body img[data-inline].img-border { border: 2px solid #64748b; }
   .note-body { overflow: hidden; position: relative; }
   .note-body-readmode { cursor: default; }
   .note-body-readmode img[data-inline] { cursor: default; }
@@ -128,8 +129,8 @@
   .note-body .li-toggle-mark::before { content: '▼'; }
   .note-body [data-collapsed="1"] > .li-toggle-mark::before { content: '▶'; }
   .note-body [data-li-hidden="1"] { display: none !important; }
-  .note-body .page-break { display: block; text-align: center; font-size: 11px; color: #94a3b8;
-    padding: 6px 0; margin: 10px 0; border-top: 1px dashed #cbd5e1; border-bottom: 1px dashed #cbd5e1; user-select: none; cursor: pointer; }
+  .note-body .page-break { display: block; text-align: center; font-size: 13px; font-weight: 700; color: #0d9488;
+    padding: 8px 0; margin: 14px 0; border-top: 2px dashed #0d9488; border-bottom: 2px dashed #0d9488; background: #f0fdfa; user-select: none; cursor: pointer; }
   .note-body .page-break.break-sel { background: #fee2e2; border-color: #ef4444; color: #ef4444; }
   /* 字級輸入框：拿掉瀏覽器原生的上下微調箭頭，不然跟 datalist 下拉圖示擠在一起，
      窄欄位裡數字會被擠到看不見（已經有 A- / A+ 按鈕可以微調了，不需要原生箭頭）。 */
@@ -199,7 +200,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/10/12 11:04";
+const BUILD_TIME = "2026/10/12 11:21";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -5313,6 +5314,14 @@ function App() {
         setSelImg(s => s ? { ...s, rect: img.getBoundingClientRect() } : s);
       };
       const isFree = !!bodyRef.current?.querySelector(`img[data-inline="${selImg.imgId}"]`)?.classList.contains('img-free');
+      const isBorder = !!bodyRef.current?.querySelector(`img[data-inline="${selImg.imgId}"]`)?.classList.contains('img-border');
+      const toggleBorder = () => {
+        const img = bodyRef.current?.querySelector(`img[data-inline="${selImg.imgId}"]`);
+        if (!img) return;
+        img.classList.toggle('img-border');
+        updateNoteFields({ body: bodyRef.current.innerHTML });
+        setSelImg(s => s ? { ...s, rect: img.getBoundingClientRect() } : s);
+      };
       return h(React.Fragment, null,
         h('div', { className: 'no-print', onPointerDown: e => { if (e.pointerType === 'mouse') e.preventDefault(); },
           style: { position: 'fixed', top: Math.max(4, r.top - 40), left: r.left, zIndex: 400,
@@ -5332,6 +5341,10 @@ function App() {
             style: { ...btnStyle, color: isFree ? '#fbbf24' : '#94a3b8', background: isFree ? 'rgba(251,191,36,.2)' : 'none', borderRadius: 4 },
             onClick: toggleFree, title: isFree ? '取消自由擺放（回到文字排列）' : '自由擺放（可拖曳到任意位置，不受文字排列影響）'
           }, isFree ? '🔓 自由' : '📌 定位'),
+          h('button', {
+            style: { ...btnStyle, color: isBorder ? '#fbbf24' : '#94a3b8', background: isBorder ? 'rgba(251,191,36,.2)' : 'none', borderRadius: 4 },
+            onClick: toggleBorder, title: isBorder ? '移除框線' : '加上框線'
+          }, isBorder ? '▭ 已加框' : '▭ 框線'),
           h('div', { style: { width: 1, background: '#4b5563', margin: '4px 2px', alignSelf: 'stretch' } }),
           h('button', { style: btnStyle, title: '裁切', onClick: () => {
             const img = bodyRef.current?.querySelector(`img[data-inline="${selImg.imgId}"]`);
