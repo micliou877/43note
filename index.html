@@ -200,7 +200,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/10/12 11:21";
+const BUILD_TIME = "2026/10/12 13:21";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -5155,13 +5155,57 @@ function App() {
                     reader.readAsDataURL(file);
                     return;
                   }
-                  // 從外部（網頁、Word、其他 App）複製進來的內容一律去除格式貼成純文字，
-                  // 避免帶入來源的表格／清單／大量 inline style，把筆記結構弄亂
+                  // 自己從筆記裡複製/剪下的內容，onCopy/onCut 會在 HTML 外面包一層帶標記的
+                  // <div data-43note-copy>，貼上時認得出來就直接保留格式貼回去（字型、顏色、
+                  // 螢光筆都在）。認不出標記（代表是從網頁、Word、其他 App 複製來的）才去除
+                  // 格式貼成純文字——避免帶入來源的表格/清單/大量 inline style，把筆記結構弄亂
                   // （例如法規網站的巢狀表格）。真的要保留格式的圖片已經在上面用
                   // clipboardData.items 的 image/* 分支處理掉了，這裡只剩文字/HTML。
+                  const pastedHtml = e.clipboardData?.getData('text/html') || '';
+                  if (pastedHtml.includes('data-43note-copy')) {
+                    e.preventDefault();
+                    const tmp = document.createElement('div');
+                    tmp.innerHTML = pastedHtml;
+                    const wrap = tmp.querySelector('[data-43note-copy]');
+                    document.execCommand('insertHTML', false, wrap ? wrap.innerHTML : pastedHtml);
+                    updateNoteFields({ body: bodyRef.current?.innerHTML || '' });
+                    return;
+                  }
                   e.preventDefault();
                   const pt = e.clipboardData?.getData('text/plain') || '';
                   if (pt) document.execCommand('insertText', false, pt);
+                },
+                onCopy: (e) => {
+                  // 標記起來，等一下貼回「這篇/別篇筆記」時才認得出是自己複製的，可以保留格式
+                  const sel = window.getSelection();
+                  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return; // 沒選東西，讓瀏覽器照平常處理
+                  const frag = sel.getRangeAt(0).cloneContents();
+                  const wrap = document.createElement('div');
+                  wrap.setAttribute('data-43note-copy', '1');
+                  wrap.appendChild(frag);
+                  e.clipboardData.setData('text/html', wrap.outerHTML);
+                  e.clipboardData.setData('text/plain', sel.toString());
+                  e.preventDefault();
+                },
+                onCut: (e) => {
+                  const sel = window.getSelection();
+                  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+                  const range = sel.getRangeAt(0);
+                  const frag = range.cloneContents();
+                  const wrap = document.createElement('div');
+                  wrap.setAttribute('data-43note-copy', '1');
+                  wrap.appendChild(frag);
+                  e.clipboardData.setData('text/html', wrap.outerHTML);
+                  e.clipboardData.setData('text/plain', sel.toString());
+                  e.preventDefault();
+                  const now = Date.now();
+                  if (now - bodyUndoLastPush.current > 800) {
+                    bodyUndoStack.current = [...bodyUndoStack.current, activeNote.body || ''].slice(-50);
+                    bodyUndoLastPush.current = now;
+                    setCanBodyUndo(true);
+                  }
+                  range.deleteContents();
+                  updateNoteFields({ body: bodyRef.current?.innerHTML || '' });
                 },
                 onKeyDown: (e) => {
                   if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undoBodyEdit(); return; }
