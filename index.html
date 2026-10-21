@@ -205,7 +205,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/10/21 09:55";
+const BUILD_TIME = "2026/10/21 10:24";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -364,6 +364,20 @@ function toBodyHtml(body) {
   return body
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/\n/g, '<br>');
+}
+
+// 從 markEl 往上走到 rootEl，每一層都把「這一層之後的兄弟節點」收集起來（含 markEl 自己）。
+// 這樣不管 markEl 實際巢狀在第幾層（例如編輯歷史留下的無樣式包裹 <div>），都能正確找出
+// 「文件順序上在 markEl 之後的所有內容」，不像純 CSS 的一般兄弟選擇器只看得到同一層的兄弟。
+function collectNodesAfterMarker(markEl, rootEl) {
+  const nodes = [markEl];
+  let node = markEl;
+  while (node && node !== rootEl) {
+    let sib = node.nextElementSibling;
+    while (sib) { nodes.push(sib); sib = sib.nextElementSibling; }
+    node = node.parentElement;
+  }
+  return nodes;
 }
 
 function stripHtml(html) {
@@ -2277,9 +2291,20 @@ function App() {
     const body = bodyRef.current;
     const freeImgs = body ? Array.from(body.querySelectorAll('img[data-inline].img-free')) : [];
     freeImgs.forEach(img => img.classList.remove('img-free'));
+
+    // 「⛔ 以下不印」標記之後的內容，列印前先暫時隱藏，列印完再復原。純 CSS 的一般兄弟選擇器
+    // 只找得到跟標記「同一層」的兄弟節點，如果標記因為編輯歷史被包在某層沒有樣式的 <div> 裡
+    // （常見於剪貼/復原留下的痕跡），就會漏掉外層的內容——改用 collectNodesAfterMarker 往上
+    // 逐層找，不管巢狀多深都抓得到。
+    const stopMark = body?.querySelector('.print-stop');
+    const hiddenNodes = stopMark ? collectNodesAfterMarker(stopMark, body) : [];
+    const prevDisplay = hiddenNodes.map(n => n.style.display);
+    hiddenNodes.forEach(n => { n.style.display = 'none'; });
+
     window.addEventListener('afterprint', () => {
       document.title = prev;
       freeImgs.forEach(img => img.classList.add('img-free'));
+      hiddenNodes.forEach((n, i) => { n.style.display = prevDisplay[i]; });
     }, { once: true });
     window.print();
   };
@@ -2470,10 +2495,11 @@ function App() {
 
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = activeNote?.body || '';
-    for (const node of Array.from(tempDiv.childNodes)) {
-      if (node.nodeType === Node.ELEMENT_NODE && node.classList?.contains('print-stop')) break; // 跟 PDF 列印一樣，這裡之後都跳過
-      await processBlock(node, undefined);
-    }
+    // 跟 exportToPDF 一樣，標記可能巢狀在某層沒有樣式的 <div> 裡，不能只看「直接子節點」，
+    // 用 collectNodesAfterMarker 把標記之後的內容（不管巢狀多深）整個從這份拋棄式複本刪掉
+    const stopMark = tempDiv.querySelector('.print-stop');
+    if (stopMark) collectNodesAfterMarker(stopMark, tempDiv).forEach(n => n.remove());
+    for (const node of Array.from(tempDiv.childNodes)) await processBlock(node, undefined);
 
     for (const im of noteImages) {
       const src = im.url || im.dataUrl;
