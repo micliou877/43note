@@ -205,7 +205,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/10/21 10:24";
+const BUILD_TIME = "2026/10/21 10:35";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -378,6 +378,29 @@ function collectNodesAfterMarker(markEl, rootEl) {
     node = node.parentElement;
   }
   return nodes;
+}
+
+// 「以下不印」標記如果緊接在「✂ 分頁」換頁標記後面（中間可能還夾著幾個空白行），
+// 這個換頁標記逼出來的新頁面會因為後面全部被隱藏而變成一頁空白。從標記往前找，
+// 只要還沒遇到真正有內容（文字或圖片）的節點，遇到的分頁標記就一併視為要隱藏。
+// 一旦遇到有內容的節點就停止，代表那一頁真的有東西要印，分頁標記要保留。
+function collectTrailingPageBreaks(markEl, rootEl) {
+  const extra = [];
+  let seenContent = false;
+  let node = markEl;
+  while (node && node !== rootEl) {
+    let prev = node.previousElementSibling;
+    while (prev) {
+      if (!seenContent && prev.classList?.contains('page-break')) {
+        extra.push(prev);
+      } else if ((prev.textContent || '').trim() || prev.querySelector?.('img')) {
+        seenContent = true;
+      }
+      prev = prev.previousElementSibling;
+    }
+    node = node.parentElement;
+  }
+  return extra;
 }
 
 function stripHtml(html) {
@@ -2297,7 +2320,9 @@ function App() {
     // （常見於剪貼/復原留下的痕跡），就會漏掉外層的內容——改用 collectNodesAfterMarker 往上
     // 逐層找，不管巢狀多深都抓得到。
     const stopMark = body?.querySelector('.print-stop');
-    const hiddenNodes = stopMark ? collectNodesAfterMarker(stopMark, body) : [];
+    const hiddenNodes = stopMark
+      ? [...collectTrailingPageBreaks(stopMark, body), ...collectNodesAfterMarker(stopMark, body)]
+      : [];
     const prevDisplay = hiddenNodes.map(n => n.style.display);
     hiddenNodes.forEach(n => { n.style.display = 'none'; });
 
@@ -2498,7 +2523,10 @@ function App() {
     // 跟 exportToPDF 一樣，標記可能巢狀在某層沒有樣式的 <div> 裡，不能只看「直接子節點」，
     // 用 collectNodesAfterMarker 把標記之後的內容（不管巢狀多深）整個從這份拋棄式複本刪掉
     const stopMark = tempDiv.querySelector('.print-stop');
-    if (stopMark) collectNodesAfterMarker(stopMark, tempDiv).forEach(n => n.remove());
+    if (stopMark) {
+      collectTrailingPageBreaks(stopMark, tempDiv).forEach(n => n.remove());
+      collectNodesAfterMarker(stopMark, tempDiv).forEach(n => n.remove());
+    }
     for (const node of Array.from(tempDiv.childNodes)) await processBlock(node, undefined);
 
     for (const im of noteImages) {
