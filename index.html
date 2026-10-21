@@ -132,6 +132,9 @@
   .note-body .page-break { display: block; text-align: center; font-size: 13px; font-weight: 700; color: #0d9488;
     padding: 8px 0; margin: 14px 0; border-top: 2px dashed #0d9488; border-bottom: 2px dashed #0d9488; background: #f0fdfa; user-select: none; cursor: pointer; }
   .note-body .page-break.break-sel { background: #fee2e2; border-color: #ef4444; color: #ef4444; }
+  .note-body .print-stop { display: block; text-align: center; font-size: 13px; font-weight: 700; color: #b45309;
+    padding: 8px 0; margin: 14px 0; border-top: 2px dashed #f59e0b; border-bottom: 2px dashed #f59e0b; background: #fffbeb; user-select: none; cursor: pointer; }
+  .note-body .print-stop.break-sel { background: #fee2e2; border-color: #ef4444; color: #ef4444; }
   /* 字級輸入框：拿掉瀏覽器原生的上下微調箭頭，不然跟 datalist 下拉圖示擠在一起，
      窄欄位裡數字會被擠到看不見（已經有 A- / A+ 按鈕可以微調了，不需要原生箭頭）。 */
   .note-fontsize-input::-webkit-inner-spin-button,
@@ -157,6 +160,8 @@
     .note-body img[data-inline] { cursor: default !important; break-inside: avoid; }
     .note-body .page-break { page-break-before: always; break-before: page; border: none !important;
       padding: 0 !important; margin: 0 !important; height: 0 !important; font-size: 0 !important; color: transparent !important; overflow: hidden; }
+    /* 標記本身連同它後面所有同層級的內容（每一行在 note-body 底下都是獨立的 <div>）都不印出來 */
+    .note-body .print-stop, .note-body .print-stop ~ * { display: none !important; }
     @page { margin: 18mm; size: A4; }
   }
 </style>
@@ -200,7 +205,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/10/12 13:21";
+const BUILD_TIME = "2026/10/21 09:55";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -2465,7 +2470,10 @@ function App() {
 
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = activeNote?.body || '';
-    for (const node of Array.from(tempDiv.childNodes)) await processBlock(node, undefined);
+    for (const node of Array.from(tempDiv.childNodes)) {
+      if (node.nodeType === Node.ELEMENT_NODE && node.classList?.contains('print-stop')) break; // 跟 PDF 列印一樣，這裡之後都跳過
+      await processBlock(node, undefined);
+    }
 
     for (const im of noteImages) {
       const src = im.url || im.dataUrl;
@@ -2843,6 +2851,12 @@ function App() {
   const insertPageBreak = () => {
     const body = bodyRef.current; if (!body) return; body.focus();
     document.execCommand('insertHTML', false, '<div class="page-break" contenteditable="false">✂ 分頁（列印/匯出PDF會從這裡換頁）</div><div><br></div>');
+  };
+  // 插入「以下不列印」標記：畫面上還是看得到、編輯得到，但列印/匯出 PDF、匯出 Word 都會在這裡停止，
+  // 標記本身跟它之後的內容全部跳過。純粹靠 @media print 的「一般兄弟選擇器」隱藏，不用另外寫邏輯判斷要印到哪。
+  const insertPrintStop = () => {
+    const body = bodyRef.current; if (!body) return; body.focus();
+    document.execCommand('insertHTML', false, '<div class="print-stop" contenteditable="false">⛔ 以下內容不會列印/匯出</div><div><br></div>');
   };
   // 對選取範圍逐一套用 perRangeFn（回傳處理後的節點，供最後定位游標用）。
   // 每一行在 note-body 底下都是獨立的 <div>（Chrome contenteditable 換行機制），
@@ -5045,7 +5059,9 @@ function App() {
                     style: { ...S.fmtBtn, fontSize: 11, color: '#94a3b8' }, title: '清除整篇筆記裡所有的收合標記與隱藏內容，全部還原成正常顯示（用來清掉測試或誤按留下的殘留標記）' }, '✕收合'),
                   h('div', { style: S.fmtDivider }),
                   h('button', { onMouseDown: (e) => { e.preventDefault(); insertPageBreak(); },
-                    style: S.fmtBtn, title: '插入分頁點，列印/匯出PDF時會從這裡另起一頁' }, '✂ 分頁')
+                    style: S.fmtBtn, title: '插入分頁點，列印/匯出PDF時會從這裡另起一頁' }, '✂ 分頁'),
+                  h('button', { onMouseDown: (e) => { e.preventDefault(); insertPrintStop(); },
+                    style: S.fmtBtn, title: '插入「以下不列印」標記，這裡之後的內容列印/匯出PDF/匯出Word都會跳過（畫面上還是看得到）' }, '⛔ 以下不印')
                 ),
                 h('div', { style: { display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 } },
                   h('button', { onClick: undoBodyEdit, disabled: !canBodyUndo, title: '上一步 (Ctrl+Z)',
@@ -5075,7 +5091,7 @@ function App() {
                   const img = e.target.tagName === 'IMG' && e.target.dataset.inline ? e.target : null;
                   if (img) selectInlineImg(img);
                   else clearSelImg();
-                  const brk = e.target.closest?.('.page-break');
+                  const brk = e.target.closest?.('.page-break, .print-stop');
                   if (selBreakRef.current && selBreakRef.current !== brk) selBreakRef.current.classList.remove('break-sel');
                   if (brk) { brk.classList.add('break-sel'); selBreakRef.current = brk; }
                   else selBreakRef.current = null;
@@ -5221,7 +5237,7 @@ function App() {
                     const sel0 = window.getSelection();
                     if (body && sel0.rangeCount) {
                       const range = sel0.getRangeAt(0);
-                      const isPageBreak = (n) => n && n.nodeType === 1 && n.classList?.contains('page-break');
+                      const isPageBreak = (n) => n && n.nodeType === 1 && (n.classList?.contains('page-break') || n.classList?.contains('print-stop'));
                       let target = null;
                       if (!range.collapsed) {
                         if (range.startContainer === range.endContainer && range.startContainer.nodeType === 1 &&
