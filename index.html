@@ -205,7 +205,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/10/21 10:35";
+const BUILD_TIME = "2026/10/28 08:40";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -5149,6 +5149,16 @@ function App() {
                   if (selBreakRef.current && selBreakRef.current !== brk) selBreakRef.current.classList.remove('break-sel');
                   if (brk) { brk.classList.add('break-sel'); selBreakRef.current = brk; }
                   else selBreakRef.current = null;
+                },
+                onDoubleClick: (e) => {
+                  // 雙擊圖片直接開標註，跟單擊選取後再按「✏️ 標注」按鈕是同一套邏輯
+                  const img = e.target.tagName === 'IMG' && e.target.dataset.inline ? e.target : null;
+                  if (!img) return;
+                  e.preventDefault();
+                  let strokes = [];
+                  try { strokes = JSON.parse(img.dataset.strokes || '[]'); } catch {}
+                  setAnnotating({ type: 'inline', imgId: img.dataset.inline, src: img.dataset.original || img.src, strokes });
+                  clearSelImg();
                 },
                 onInput: () => {
                   const html = bodyRef.current?.innerHTML || '';
