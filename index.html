@@ -205,7 +205,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/10/28 08:40";
+const BUILD_TIME = "2026/11/02 10:04";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -798,7 +798,7 @@ function NoteCaseTagModal({ note, projects, onSave, onCancel }) {
   );
 }
 
-function NoteLinkModal({ notes, selectedIds, onSave, onCancel }) {
+function NoteLinkModal({ notes, projects, selectedIds, onSave, onCancel }) {
   const [noteIds, setNoteIds] = useState(selectedIds || []);
   const [loading, setLoading] = useState(false);
 
@@ -810,19 +810,30 @@ function NoteLinkModal({ notes, selectedIds, onSave, onCancel }) {
     try { await onSave(noteIds); } catch { setLoading(false); }
   };
 
+  // 依專案分組：notes 現在是跨所有專案抓回來的，不分組的話混在一起很難找到要勾的那篇
+  const groups = {};
+  for (const n of (notes || [])) {
+    const name = projects?.find(p => p.id === n.projectId)?.name || '未分類';
+    (groups[name] = groups[name] || []).push(n);
+  }
+  const groupNames = Object.keys(groups).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+
   return h('div', { style: S.modalOverlay, onClick: e => e.target === e.currentTarget && onCancel() },
     h('div', { style: S.modalCard },
       h('h3', { style: S.modalTitle }, '🔗 標記相關筆記'),
-      h('p', { style: S.modalSub }, '勾選與這個任務相關的筆記，之後可以直接點過去查看。'),
+      h('p', { style: S.modalSub }, '勾選與這個任務相關的筆記（任何專案的筆記都可以選），之後可以直接點過去查看。'),
       notes && notes.length > 0
-        ? h('div', { style: { maxHeight: 260, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 10, padding: 6, marginBottom: 16 } },
-            ...notes.map(n => h('label', { key: n.id,
-              style: { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 13, color: '#374151' } },
-              h('input', { type: 'checkbox', checked: noteIds.includes(n.id), onChange: () => toggleNote(n.id) }),
-              h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, n.title || '未命名筆記')
+        ? h('div', { style: { maxHeight: 320, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 10, padding: 6, marginBottom: 16 } },
+            ...groupNames.map(gname => h(React.Fragment, { key: gname },
+              h('div', { style: { fontSize: 11, color: '#94a3b8', fontWeight: 600, padding: '6px 8px 2px' } }, gname),
+              ...groups[gname].map(n => h('label', { key: n.id,
+                style: { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 13, color: '#374151' } },
+                h('input', { type: 'checkbox', checked: noteIds.includes(n.id), onChange: () => toggleNote(n.id) }),
+                h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, n.title || '未命名筆記')
+              ))
             ))
           )
-        : h('p', { style: { ...S.modalSub, marginBottom: 16 } }, '這個專案目前還沒有筆記可以標記。'),
+        : h('p', { style: { ...S.modalSub, marginBottom: 16 } }, '目前還沒有筆記可以標記。'),
       h('div', { style: S.modalActions },
         h('button', { onClick: onCancel, disabled: loading, style: S.ghostBtn }, '取消'),
         h('button', { onClick: submit, disabled: loading, style: S.primaryBtn }, loading ? '處理中…' : '儲存')
@@ -1757,6 +1768,7 @@ function App() {
   const [highlightTaskId, setHighlightTaskId] = useState(null); // 從逾期提醒點進來要高亮的任務
   const [copiedOverdueId, setCopiedOverdueId] = useState(null);
   const [linkNotesTask, setLinkNotesTask] = useState(null); // task being tagged with related notes
+  const [linkNotesTaskNotes, setLinkNotesTaskNotes] = useState([]); // notes available when linkNotesTask belongs to a different project than activeProject
   const [caseTagNote, setCaseTagNote] = useState(null); // note being tagged with related case (project)
   const [noteTitleCache, setNoteTitleCache] = useState({}); // noteId -> { title, projectId } (for cross-project "所有任務" view)
   const [noteSort, setNoteSort] = useState('updated');  // 'updated' | 'created' | 'name'
@@ -2137,6 +2149,19 @@ function App() {
     })();
     return () => { cancelled = true; };
   }, [user, showAllTasks, allTasksFull, overdueModal]);
+
+  // 「標記相關筆記」要能選任何專案的筆記，不是只有任務自己那個專案——開啟時一次抓使用者全部的筆記
+  useEffect(() => {
+    if (!linkNotesTask || !user) { setLinkNotesTaskNotes([]); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDocs(query(collection(db, `users/${user.uid}/notes`), where('deleted', '==', false)));
+        if (!cancelled) setLinkNotesTaskNotes(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch { if (!cancelled) setLinkNotesTaskNotes([]); }
+    })();
+    return () => { cancelled = true; };
+  }, [linkNotesTask?.id, user]);
 
   // Projects
   const createProject = async (name) => {
@@ -4339,6 +4364,8 @@ function App() {
           ),
           h('button', { onClick: e => { e.stopPropagation(); setSetDueDateTask(t); }, title: '設截止日期 / 提醒',
             style: { ...S.imgActBtn, margin: 0, flexShrink: 0, fontSize: 13, padding: '5px 7px' } }, '📅'),
+          h('button', { onClick: e => { e.stopPropagation(); setLinkNotesTask(t); }, title: '標記相關筆記',
+            style: { ...S.imgActBtn, margin: 0, flexShrink: 0, fontSize: 13, padding: '5px 7px', color: t.noteIds?.length ? '#2563eb' : undefined } }, '🔗'),
           h('button', { onClick: e => { e.stopPropagation(); setEditingRemark({ id: t.id, value: t.remark || '' }); }, title: '加備註',
             style: { ...S.imgActBtn, margin: 0, flexShrink: 0, fontSize: 13, padding: '5px 7px', color: t.remark ? '#0d9488' : undefined } }, '💬'),
           confirmDel?.type === 'task' && confirmDel.id === t.id
@@ -4380,6 +4407,12 @@ function App() {
         task: setDueDateTask,
         onSave: (dueDate, reminderOffset, recur, recurInterval) => updateTaskDueDate(setDueDateTask.id, dueDate, reminderOffset, recur, recurInterval),
         onCancel: () => setSetDueDateTask(null)
+      }),
+      linkNotesTask && h(NoteLinkModal, {
+        notes: linkNotesTaskNotes, projects,
+        selectedIds: linkNotesTask.noteIds || [],
+        onSave: (ids) => updateTaskNoteLinks(linkNotesTask.id, ids),
+        onCancel: () => setLinkNotesTask(null)
       }),
       completeTaskId && h(CompleteTaskModal, {
         task: completingTask, notes: completingTaskNotes,
@@ -5513,7 +5546,7 @@ function App() {
     lightbox && h(Lightbox, { image: lightbox, onClose: () => setLightbox(null) }),
     newTaskModal && h(NewTaskModal, { onConfirm: addTask, onCancel: () => setNewTaskModal(false), notes: visibleNotes, initialDueDate: newTaskModal.dueDate || '', initialNoteIds: newTaskModal.noteIds || [] }),
     linkNotesTask && h(NoteLinkModal, {
-      notes: visibleNotes,
+      notes: linkNotesTaskNotes, projects,
       selectedIds: linkNotesTask.noteIds || [],
       onSave: (ids) => updateTaskNoteLinks(linkNotesTask.id, ids),
       onCancel: () => setLinkNotesTask(null)
