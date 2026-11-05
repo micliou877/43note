@@ -205,7 +205,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/11/05 17:35";
+const BUILD_TIME = "2026/11/05 17:37";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -2015,6 +2015,7 @@ function App() {
   const [latestNoteTime, setLatestNoteTime] = useState(null);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
+  const [searchWinPos, setSearchWinPos] = useState(null); // 浮動搜尋視窗位置；null = 預設右上角
   const [allNotesForSearch, setAllNotesForSearch] = useState([]);
   const [allTasksForSearch, setAllTasksForSearch] = useState([]);
   const [searchJumpRequest, setSearchJumpRequest] = useState(null); // 從搜尋結果點筆記時，記錄要跳去哪個筆記、高亮哪個關鍵字
@@ -4061,11 +4062,43 @@ function App() {
       .slice(0, 60);
   })() : [];
 
+  // 拖曳浮動搜尋視窗的標題列來移動位置
+  const startSearchWinDrag = (e) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    e.preventDefault();
+    const panelW = Math.min(400, window.innerWidth - 32);
+    const startLeft = searchWinPos ? searchWinPos.left : (window.innerWidth - panelW - 16);
+    const startTop = searchWinPos ? searchWinPos.top : 16;
+    const startX = e.clientX, startY = e.clientY;
+    const onMove = (ev) => {
+      const nl = Math.max(0, Math.min(window.innerWidth - 60, startLeft + ev.clientX - startX));
+      const nt = Math.max(0, Math.min(window.innerHeight - 40, startTop + ev.clientY - startY));
+      setSearchWinPos({ left: nl, top: nt });
+    };
+    const onUp = () => {
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+
   const globalSearchModal = globalSearchOpen && h('div', {
     className: 'no-print',
-    style: { position: 'fixed', top: 16, right: 16, zIndex: 500, width: 'min(400px, calc(100vw - 32px))', maxHeight: '75vh', display: 'flex', flexDirection: 'column', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,.25)', border: '1px solid #e5e7eb' }
+    style: {
+      position: 'fixed',
+      ...(searchWinPos ? { top: searchWinPos.top, left: searchWinPos.left } : { top: 16, right: 16 }),
+      zIndex: 500, width: 'min(400px, calc(100vw - 32px))', maxHeight: '75vh', display: 'flex', flexDirection: 'column', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,.25)', border: '1px solid #e5e7eb'
+    }
   },
-      h('div', { style: { padding: '14px 16px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 8 } },
+      h('div', {
+        onMouseDown: startSearchWinDrag,
+        title: '拖曳移動視窗',
+        style: { cursor: 'move', padding: '6px 10px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', userSelect: 'none', flexShrink: 0, color: '#cbd5e1', fontSize: 13, letterSpacing: 2 }
+      }, '⠿⠿⠿'),
+      h('div', { style: { padding: '8px 16px 14px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 8 } },
         h('div', { style: { flex: 1, display: 'flex', alignItems: 'center', gap: 8, background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 10, padding: '8px 12px' } },
           h('span', { style: { color: '#94a3b8', fontSize: 15 } }, '🔍'),
           h('input', {
