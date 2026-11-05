@@ -205,7 +205,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/11/04 11:27";
+const BUILD_TIME = "2026/11/05 17:35";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -1418,6 +1418,12 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
     setTool("text");
   };
 
+  // 選取中的物件（剛畫完/剛編輯完那個）也能直接改顏色、粗細、字級、填滿
+  const updateSelected = (patch) => {
+    if (!selectedId) return;
+    setStrokes((arr) => arr.map((s) => (s.id === selectedId ? { ...s, ...patch } : s)));
+  };
+
   const undo = () => setStrokes((s) => s.slice(0, -1));
   const save = () => {
     cur.current = null;
@@ -1451,24 +1457,25 @@ function PhotoAnnotator({ src, initialStrokes, initialGrayscale, onSave, onClose
           ...tools.map((t) =>
             h('button', { key: t.id, onClick: () => { setTool(t.id); setSelectedId(null); }, title: t.label,
               style: { ...S.toolBtn, ...(tool === t.id ? S.toolBtnActive : {}) } }, t.icon)),
-          (tool === "rect" || tool === "ellipse") && h('button', { onClick: () => setFillShape(f => !f), title: "填滿形狀",
-            style: { ...S.toolBtn, ...(fillShape ? S.toolBtnActive : {}) } }, fillShape ? '⬛' : '⬜'),
+          (tool === "rect" || tool === "ellipse") && h('button', {
+            onClick: () => setFillShape(f => { const nv = !f; updateSelected({ fill: nv }); return nv; }),
+            title: "填滿形狀", style: { ...S.toolBtn, ...(fillShape ? S.toolBtnActive : {}) } }, fillShape ? '⬛' : '⬜'),
           h('button', { onClick: undo, title: "復原", style: S.toolBtn }, '⟲'),
           h('button', { onClick: () => setGrayscale(g => !g), title: "黑白底圖",
             style: { ...S.toolBtn, ...(grayscale ? S.toolBtnActive : {}) } }, '◐')
         ),
         h('div', { style: { display: "flex", alignItems: "center", gap: 6 } },
           ...COLORS.map((c) =>
-            h('button', { key: c, onClick: () => setColor(c),
+            h('button', { key: c, onClick: () => { setColor(c); updateSelected({ color: c }); },
               style: { ...S.swatch, background: c, outline: color === c ? "2px solid #fff" : "1px solid #475569", outlineOffset: 2 } })),
           tool === "erase"
             ? h('input', { key: 'erase-size', type: "range", min: 8, max: 80, value: eraserSize, title: `橡皮擦大小 ${eraserSize}`,
-                onChange: (e) => setEraserSize(+e.target.value), style: { flex: 1 } })
+                onChange: (e) => { const v = +e.target.value; setEraserSize(v); updateSelected({ width: v }); }, style: { flex: 1 } })
             : tool === "text"
             ? h('input', { key: 'font-size', type: "range", min: 14, max: 72, value: fontSize, title: `文字大小 ${fontSize}`,
-                onChange: (e) => setFontSize(+e.target.value), style: { flex: 1 } })
+                onChange: (e) => { const v = +e.target.value; setFontSize(v); updateSelected({ size: v }); }, style: { flex: 1 } })
             : h('input', { key: 'pen-size', type: "range", min: 2, max: 14, value: width, title: `筆寬 ${width}`,
-                onChange: (e) => setWidth(+e.target.value), style: { flex: 1 } })
+                onChange: (e) => { const v = +e.target.value; setWidth(v); updateSelected({ width: v }); }, style: { flex: 1 } })
         ),
         h('div', { style: { display: "flex", alignItems: "center", gap: 6 } },
           h('button', { onClick: () => setZoom(z => Math.max(0.25, +(z-0.25).toFixed(2))), title: '縮小', style: S.toolBtn }, '−'),
