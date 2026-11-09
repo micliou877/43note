@@ -205,7 +205,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/11/09 12:01";
+const BUILD_TIME = "2026/11/09 14:09";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -4028,6 +4028,14 @@ function App() {
     byOrder(a, b) || getSafeTime(b.created) - getSafeTime(a.created));
   const sortedProjectFolders = [...projectFolders].sort((a, b) =>
     byOrder(a, b) || getSafeTime(a.created) - getSafeTime(b.created));
+  const flatProjectFolders = (() => {
+    const byParent = {};
+    sortedProjectFolders.forEach(f => { const pid = f.parentId || null; (byParent[pid] = byParent[pid] || []).push(f); });
+    const out = [];
+    const walk = (pid, depth) => { (byParent[pid] || []).forEach(f => { out.push({ f, depth }); walk(f.id, depth + 1); }); };
+    walk(null, 0);
+    return out;
+  })();
   const sortedNoteFolders = [...noteFolders].sort((a, b) =>
     byOrder(a, b) || getSafeTime(a.created) - getSafeTime(b.created));
   const deletedProjects = projects.filter(p => p.deleted);
@@ -5813,9 +5821,15 @@ function App() {
         h('h3', { style: { margin: '0 0 12px', fontSize: 15, color: '#1f2937' } }, '移到資料夾'),
         h('div', { onClick: () => folderMenu.type === 'project' ? setProjectFolder(folderMenu.id, null) : setNoteFolder(folderMenu.id, null),
           style: { padding: '10px 14px', cursor: 'pointer', borderRadius: 8, border: '1px solid #e5e7eb', marginBottom: 6, fontSize: 14 } }, '🗂 未分類'),
-        ...(folderMenu.type === 'project' ? projectFolders : noteFolders).map(f =>
-          h('div', { key: f.id, onClick: () => folderMenu.type === 'project' ? setProjectFolder(folderMenu.id, f.id) : setNoteFolder(folderMenu.id, f.id),
-            style: { padding: '10px 14px', cursor: 'pointer', borderRadius: 8, border: '1px solid #e5e7eb', marginBottom: 6, fontSize: 14 } }, `📁 ${f.name}`)
+        ...(folderMenu.type === 'project'
+          ? flatProjectFolders.map(({ f, depth }) =>
+              h('div', { key: f.id, onClick: () => setProjectFolder(folderMenu.id, f.id),
+                style: { padding: '10px 14px', cursor: 'pointer', borderRadius: 8, border: '1px solid #e5e7eb', marginBottom: 6, fontSize: 14, marginLeft: depth * 14 } }, `📁 ${f.name}`)
+            )
+          : noteFolders.map(f =>
+              h('div', { key: f.id, onClick: () => setNoteFolder(folderMenu.id, f.id),
+                style: { padding: '10px 14px', cursor: 'pointer', borderRadius: 8, border: '1px solid #e5e7eb', marginBottom: 6, fontSize: 14 } }, `📁 ${f.name}`)
+            )
         ),
         h('button', { onClick: () => setFolderMenu(null), style: { ...S.ghostBtn, width: '100%', marginTop: 4 } }, '取消')
       )
