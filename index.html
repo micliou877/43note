@@ -205,7 +205,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/11/09 14:09";
+const BUILD_TIME = "2026/11/09 14:22";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -4353,7 +4353,7 @@ function App() {
       !showTrash && activeProjects.length === 0 && projectFolders.length === 0 && !creatingProj && h('div', { style: S.empty }, '還沒有專案'),
       !showTrash && [
         ...(() => {
-          const folderBgs = ['#f0fdfa','#f0f4ff','#fef9ee','#fff0f9'];
+          const folderBgs = ['#ccfbf1','#dbeafe','#fef3c7','#fce7f3','#ede9fe','#d1fae5'];
           // 資料夾可以有子資料夾：遞迴畫自己 → 子資料夾 → 裡面的專案
           const renderProjectFolderNode = (folder, depth, colorIdx) => {
             const fps = activeProjects.filter(p => p.folderId === folder.id);
@@ -4976,7 +4976,7 @@ function App() {
               ...sortedNoteFolders.map((folder, fi) => {
                 const fns = filtered.filter(n => n.folderId === folder.id);
                 const collapsed = collapsedFolders.has(folder.id);
-                const folderBgs = ['#f0fdfa','#f0f4ff','#fef9ee','#fff0f9'];
+                const folderBgs = ['#ccfbf1','#dbeafe','#fef3c7','#fce7f3','#ede9fe','#d1fae5'];
                 return h('div', { key: `nf-${folder.id}`, style: { background: folderBgs[fi % folderBgs.length], borderRadius: 6, marginBottom: 4, overflow: 'hidden' } },
                   h('div', {
                     draggable: true,
