@@ -205,7 +205,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/11/09 14:22";
+const BUILD_TIME = "2026/11/10 09:57";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -286,10 +286,11 @@ function nextOccurrenceDate(dueDate, recur, recurInterval) {
   if (recur === 'weekly') d.setDate(d.getDate() + 7);
   else if (recur === 'monthly') d.setMonth(d.getMonth() + 1);
   else if (recur === 'bimonthly') d.setMonth(d.getMonth() + 2);
+  else if (recur === 'yearly') d.setFullYear(d.getFullYear() + 1);
   else if (recur === 'custom' && recurInterval > 0) d.setDate(d.getDate() + recurInterval);
   return d;
 }
-const RECUR_LABEL = { weekly: '每週', monthly: '每月', bimonthly: '每兩個月', custom: '自訂' };
+const RECUR_LABEL = { weekly: '每週', monthly: '每月', bimonthly: '每兩個月', yearly: '每年', custom: '自訂' };
 
 function compressImage(file) {
   return new Promise((resolve, reject) => {
@@ -635,6 +636,7 @@ function CompleteTaskModal({ task, notes, onConfirm, onCancel, zIndex }) {
             h('option', { value: 'weekly' }, '每週一次'),
             h('option', { value: 'monthly' }, '每月一次'),
             h('option', { value: 'bimonthly' }, '每兩個月一次'),
+            h('option', { value: 'yearly' }, '每年一次'),
             h('option', { value: 'custom' }, '每 N 天一次')
           ),
           relayRecur === 'custom' && h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 } },
@@ -741,6 +743,7 @@ function NewTaskModal({ onConfirm, onCancel, notes, projects, defaultProjectId, 
           h('option', { value: 'weekly' }, '每週一次'),
           h('option', { value: 'monthly' }, '每月一次'),
           h('option', { value: 'bimonthly' }, '每兩個月一次'),
+          h('option', { value: 'yearly' }, '每年一次'),
           h('option', { value: 'custom' }, '每 N 天一次')
         ),
         recur === 'custom' && h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 } },
@@ -897,6 +900,7 @@ function DueDateModal({ task, onSave, onCancel }) {
           h('option', { value: 'weekly' }, '每週一次'),
           h('option', { value: 'monthly' }, '每月一次'),
           h('option', { value: 'bimonthly' }, '每兩個月一次'),
+          h('option', { value: 'yearly' }, '每年一次'),
           h('option', { value: 'custom' }, '每 N 天一次')
         ),
         recur === 'custom' && h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 } },
