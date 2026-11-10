@@ -135,6 +135,9 @@
   .note-body .print-stop { display: block; text-align: center; font-size: 13px; font-weight: 700; color: #b45309;
     padding: 8px 0; margin: 14px 0; border-top: 2px dashed #f59e0b; border-bottom: 2px dashed #f59e0b; background: #fffbeb; user-select: none; cursor: pointer; }
   .note-body .print-stop.break-sel { background: #fee2e2; border-color: #ef4444; color: #ef4444; }
+  .note-body table.side-by-side { width: 100%; border-collapse: collapse; table-layout: fixed; margin: 6px 0; }
+  .note-body table.side-by-side td.sbs-col { vertical-align: top; padding: 8px 10px; border: 1px dashed #cbd5e1; border-radius: 4px; min-width: 0; outline: none; }
+  .note-body table.side-by-side td.sbs-col:focus { border-color: #0d9488; }
   /* 字級輸入框：拿掉瀏覽器原生的上下微調箭頭，不然跟 datalist 下拉圖示擠在一起，
      窄欄位裡數字會被擠到看不見（已經有 A- / A+ 按鈕可以微調了，不需要原生箭頭）。 */
   .note-fontsize-input::-webkit-inner-spin-button,
@@ -158,6 +161,8 @@
     .note-body .li-toggle-mark { display: none !important; }
     .note-body img[data-inline]:hover, .note-body img[data-inline].img-sel { outline: none !important; }
     .note-body img[data-inline] { cursor: default !important; break-inside: avoid; }
+    .note-body table.side-by-side { break-inside: avoid; }
+    .note-body table.side-by-side td.sbs-col { border-style: solid; border-color: #e5e7eb; }
     .note-body .page-break { page-break-before: always; break-before: page; border: none !important;
       padding: 0 !important; margin: 0 !important; height: 0 !important; font-size: 0 !important; color: transparent !important; overflow: hidden; }
     /* 標記本身連同它後面所有同層級的內容（每一行在 note-body 底下都是獨立的 <div>）都不印出來 */
@@ -192,7 +197,7 @@ import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore, collection, query, orderBy, where, onSnapshot, addDoc, setDoc, deleteDoc, doc, getDoc, updateDoc, serverTimestamp, writeBatch, getDocs, deleteField, limit } from "firebase/firestore";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
-import { Document, Paragraph, TextRun, ImageRun, HeadingLevel, Packer, ShadingType, UnderlineType } from "docx";
+import { Document, Paragraph, TextRun, ImageRun, HeadingLevel, Packer, ShadingType, UnderlineType, Table, TableRow, TableCell, WidthType } from "docx";
 
 // ════════════════════════════════════════════════════════════════
 const firebaseConfig = {
@@ -205,7 +210,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/11/10 11:04";
+const BUILD_TIME = "2026/11/10 11:32";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -2632,7 +2637,7 @@ function App() {
 
     const BLOCK_TAGS = ['div', 'p', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote'];
     const isBlockNode = (n) => n.nodeType === Node.ELEMENT_NODE &&
-      (BLOCK_TAGS.includes(n.tagName.toLowerCase()) || n.classList?.contains('page-break'));
+      (BLOCK_TAGS.includes(n.tagName.toLowerCase()) || n.classList?.contains('page-break') || n.classList?.contains('side-by-side'));
 
     // 收集一段「行內」內容（文字/粗體/斜體/底線/刪除線/文字顏色/螢光/行內圖片）。
     // <br> 用 TextRun 的 break 呈現換行，維持跟畫面上一致的斷行，不會把兩行黏在一起。
@@ -2679,6 +2684,7 @@ function App() {
     };
 
     const paras = [];
+    let sink = paras; // 目前段落要塞進哪個陣列；處理並排欄表格時會暫時指向某一欄自己的陣列
     paras.push(new Paragraph({ text: title, heading: HeadingLevel.HEADING_1 }));
     const lvls = [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3, HeadingLevel.HEADING_4, HeadingLevel.HEADING_5, HeadingLevel.HEADING_6];
 
@@ -2690,7 +2696,7 @@ function App() {
         let buffer = [];
         const flush = async () => {
           const runs = await collectRuns(buffer, {});
-          if (runs.length) paras.push(new Paragraph({ children: runs, indent }));
+          if (runs.length) sink.push(new Paragraph({ children: runs, indent }));
           buffer = [];
         };
         for (const kid of kids) {
@@ -2700,7 +2706,7 @@ function App() {
         await flush();
       } else {
         const runs = await collectRuns(node, {});
-        paras.push(runs.length ? new Paragraph({ children: runs, indent }) : new Paragraph({ indent }));
+        sink.push(runs.length ? new Paragraph({ children: runs, indent }) : new Paragraph({ indent }));
       }
     };
 
@@ -2714,7 +2720,7 @@ function App() {
           const inlineKids = kids.filter(k => !isBlockNode(k));
           const prefix = ordered ? `${n++}. ` : '• ';
           const runs = await collectRuns(inlineKids, {});
-          paras.push(new Paragraph({ children: [new TextRun(prefix), ...runs], indent }));
+          sink.push(new Paragraph({ children: [new TextRun(prefix), ...runs], indent }));
           for (const bk of blockKids) await processBlock(bk, { left: (indent?.left || 0) + 720 });
         } else if (tag === 'ul' || tag === 'ol') {
           // 瀏覽器產生巢狀清單時常把子清單直接放在 <li> 外面、跟 <li> 平級，
@@ -2726,30 +2732,56 @@ function App() {
       }
     };
 
+    // 把某個節點底下的內容處理成獨立的一組段落（例如並排欄表格的某一欄），
+    // 不影響目前外層正在輸出的 paras／sink
+    const collectParasFrom = async (node, indent) => {
+      const prevSink = sink;
+      const local = [];
+      sink = local;
+      try { await processContainer(node, indent); } finally { sink = prevSink; }
+      return local;
+    };
+
     const processBlock = async (node, indent) => {
       if (node.nodeType === Node.TEXT_NODE) {
-        if (node.textContent.trim()) paras.push(new Paragraph({ children: [new TextRun(node.textContent)], indent }));
+        if (node.textContent.trim()) sink.push(new Paragraph({ children: [new TextRun(node.textContent)], indent }));
         return;
       }
       if (node.nodeType !== Node.ELEMENT_NODE) return;
       const tag = node.tagName.toLowerCase();
 
       // 分頁符號標記只在編輯畫面提示用，匯出時轉成真正的 Word 分頁，不要把提示文字塞進內容
-      if (node.classList?.contains('page-break')) { paras.push(new Paragraph({ children: [], pageBreakBefore: true })); return; }
+      if (node.classList?.contains('page-break')) { sink.push(new Paragraph({ children: [], pageBreakBefore: true })); return; }
       if (tag === 'img') {
         const src = node.getAttribute('src') || '';
-        if (src.startsWith('data:') || src.startsWith('http')) paras.push(await makeImgPara(src));
+        if (src.startsWith('data:') || src.startsWith('http')) sink.push(await makeImgPara(src));
         return;
       }
-      if (tag === 'br') { paras.push(new Paragraph({})); return; }
+      if (tag === 'br') { sink.push(new Paragraph({})); return; }
       if (/^h[1-6]$/.test(tag)) {
         const runs = await collectRuns(node, {});
-        paras.push(new Paragraph({ children: runs, heading: lvls[parseInt(tag[1], 10) - 1] }));
+        sink.push(new Paragraph({ children: runs, heading: lvls[parseInt(tag[1], 10) - 1] }));
         return;
       }
       if (tag === 'blockquote') { await processContainer(node, { left: (indent?.left || 0) + 720 }); return; }
       if (tag === 'ul') { await processList(node, false, indent); return; }
       if (tag === 'ol') { await processList(node, true, indent); return; }
+
+      // 左右並排欄（.side-by-side）：轉成真正的 Word 兩欄表格，每一欄的內容各自獨立處理
+      if (tag === 'table' && node.classList?.contains('side-by-side')) {
+        const cols = Array.from(node.querySelectorAll('td.sbs-col'));
+        if (cols.length) {
+          const cells = await Promise.all(cols.map(async (td) => {
+            const cellParas = await collectParasFrom(td, undefined);
+            return new TableCell({
+              width: { size: Math.round(100 / cols.length), type: WidthType.PERCENTAGE },
+              children: cellParas.length ? cellParas : [new Paragraph({})],
+            });
+          }));
+          sink.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [new TableRow({ children: cells })] }));
+        }
+        return;
+      }
 
       // 自訂條列（li1/li2/li3）：前綴數字/字母/符號已經是文字內容本身，不要再多加一個項目符號
       const li3 = node.classList?.contains('li3');
@@ -2758,14 +2790,14 @@ function App() {
       if (li1 || li2 || li3) {
         const runs = await collectRuns(node, {});
         const left = li3 ? 1440 : li2 ? 720 : 0;
-        paras.push(runs.length ? new Paragraph({ children: runs, indent: { left } }) : new Paragraph({ indent: { left } }));
+        sink.push(runs.length ? new Paragraph({ children: runs, indent: { left } }) : new Paragraph({ indent: { left } }));
         return;
       }
       if (tag === 'div' || tag === 'p') { await processContainer(node, indent); return; }
 
       // 其他殘留的行內元素（例如貼上內容留下的 span/font）在頂層時當一行處理
       const runs = await collectRuns(node, {});
-      if (runs.length) paras.push(new Paragraph({ children: runs, indent }));
+      if (runs.length) sink.push(new Paragraph({ children: runs, indent }));
     };
 
     const tempDiv = document.createElement('div');
@@ -3161,6 +3193,15 @@ function App() {
   const insertPrintStop = () => {
     const body = bodyRef.current; if (!body) return; body.focus();
     document.execCommand('insertHTML', false, '<div class="print-stop" contenteditable="false">⛔ 以下內容不會列印/匯出</div><div><br></div>');
+  };
+  // 插入左右並排的兩欄（用表格做，contentEditable 裡最穩定、兩邊可以各自獨立打字/貼圖）
+  const insertSideBySide = () => {
+    const body = bodyRef.current; if (!body) return; body.focus();
+    document.execCommand('insertHTML', false,
+      '<table class="side-by-side" contenteditable="false"><tbody><tr>' +
+      '<td class="sbs-col" contenteditable="true"><div>在這裡輸入…</div></td>' +
+      '<td class="sbs-col" contenteditable="true"><div>在這裡輸入…</div></td>' +
+      '</tr></tbody></table><div><br></div>');
   };
   // 對選取範圍逐一套用 perRangeFn（回傳處理後的節點，供最後定位游標用）。
   // 每一行在 note-body 底下都是獨立的 <div>（Chrome contenteditable 換行機制），
@@ -5429,7 +5470,9 @@ function App() {
                   h('button', { onMouseDown: (e) => { e.preventDefault(); insertPageBreak(); },
                     style: S.fmtBtn, title: '插入分頁點，列印/匯出PDF時會從這裡另起一頁' }, '✂ 分頁'),
                   h('button', { onMouseDown: (e) => { e.preventDefault(); insertPrintStop(); },
-                    style: S.fmtBtn, title: '插入「以下不列印」標記，這裡之後的內容列印/匯出PDF/匯出Word都會跳過（畫面上還是看得到）' }, '⛔ 以下不印')
+                    style: S.fmtBtn, title: '插入「以下不列印」標記，這裡之後的內容列印/匯出PDF/匯出Word都會跳過（畫面上還是看得到）' }, '⛔ 以下不印'),
+                  h('button', { onMouseDown: (e) => { e.preventDefault(); insertSideBySide(); },
+                    style: S.fmtBtn, title: '插入左右並排的兩欄文字區塊，兩邊可以各自獨立輸入內容' }, '⬌ 並排欄')
                 ),
                 h('div', { style: { display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 } },
                   h('button', { onClick: undoBodyEdit, disabled: !canBodyUndo, title: '上一步 (Ctrl+Z)',
