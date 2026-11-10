@@ -111,7 +111,7 @@
   .note-body ul, .note-body ol { padding-left: 1.5em; margin: 4px 0; }
   .note-body li { margin: 2px 0; }
   .note-body blockquote { margin: 4px 0 4px 1.5em; padding-left: 8px; border-left: 3px solid #d1d5db; color: #6b7280; }
-  .note-body img[data-inline] { max-width: 100%; border-radius: 6px; cursor: pointer; display: block; margin: 6px 0; }
+  .note-body img[data-inline] { max-width: 100%; border-radius: 6px; cursor: pointer; display: block; margin: 6px 0; -webkit-touch-callout: none; }
   .note-body img[data-inline]:hover { outline: 2px solid #0d9488; }
   .note-body img[data-inline].img-sel { outline: 2px solid #0d9488; }
   .note-body img[data-inline].img-border { border: 2px solid #64748b; }
@@ -205,7 +205,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/11/10 09:57";
+const BUILD_TIME = "2026/11/10 10:52";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -1651,6 +1651,7 @@ function Lightbox({ image, onClose }) {
   const [zoom, setZoom] = useState(1);
   const [baseDims, setBaseDims] = useState({ w: 0, h: 0 });
   const pinchDist = useRef(null);
+  const swipeStart = useRef(null); // { x, y } 單指下滑手勢的起點，用來判斷是否要關閉全螢幕
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
@@ -1759,9 +1760,25 @@ function Lightbox({ image, onClose }) {
               e.touches[0].clientX - e.touches[1].clientX,
               e.touches[0].clientY - e.touches[1].clientY
             );
+            swipeStart.current = null;
+          } else if (e.touches.length === 1) {
+            swipeStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+          } else {
+            swipeStart.current = null;
           }
         },
-        onTouchEnd: () => { pinchDist.current = null; },
+        onTouchEnd: (e) => {
+          pinchDist.current = null;
+          if (swipeStart.current && zoom <= 1.05) {
+            const t = e.changedTouches && e.changedTouches[0];
+            if (t) {
+              const dx = t.clientX - swipeStart.current.x;
+              const dy = t.clientY - swipeStart.current.y;
+              if (dy > 80 && dy > Math.abs(dx) * 1.5) onClose();
+            }
+          }
+          swipeStart.current = null;
+        },
       },
         h('canvas', { ref: canvasRef, style: {
           display: 'block', borderRadius: 10,
@@ -2009,6 +2026,9 @@ function App() {
   const bodyUndoStack      = useRef([]);
   const bodyUndoLastPush   = useRef(0);
   const bodyRef            = useRef(null);
+  const inlineImgLongPressTimer = useRef(null);
+  const inlineImgLongPressStart = useRef(null); // { img, x, y }
+  const inlineImgLongPressFired = useRef(false);
   const savedSelRangeRef   = useRef(null);
   const selBreakRef        = useRef(null);
   const overdueAlertShownRef = useRef(false);
@@ -5422,6 +5442,7 @@ function App() {
                 'data-placeholder': '在這裡寫工作記事…　拍照或匯入照片後，點照片即可在上面畫圖、標註。',
                 className: 'note-body' + (readMode ? ' note-body-readmode' : ''),
                 onMouseDown: startFreeImgDrag,
+                onContextMenu: (e) => { if (e.target.tagName === 'IMG' && e.target.dataset.inline) e.preventDefault(); },
                 onClick: (e) => {
                   const mark = e.target.closest?.('.li-toggle-mark');
                   if (mark && mark.parentElement) {
@@ -5446,6 +5467,46 @@ function App() {
                   try { strokes = JSON.parse(img.dataset.strokes || '[]'); } catch {}
                   setAnnotating({ type: 'inline', imgId: img.dataset.inline, src: img.dataset.original || img.src, strokes });
                   clearSelImg();
+                },
+                onTouchStart: (e) => {
+                  // 手機長按照片開全螢幕預覽（放大、可雙指縮放），跟單擊選取/雙擊標註是分開的手勢
+                  const img = e.target.tagName === 'IMG' && e.target.dataset.inline ? e.target : null;
+                  if (!img || e.touches.length !== 1) {
+                    clearTimeout(inlineImgLongPressTimer.current);
+                    inlineImgLongPressTimer.current = null;
+                    inlineImgLongPressStart.current = null;
+                    return;
+                  }
+                  inlineImgLongPressStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                  inlineImgLongPressFired.current = false;
+                  inlineImgLongPressTimer.current = setTimeout(() => {
+                    inlineImgLongPressFired.current = true;
+                    let strokes = [];
+                    try { strokes = JSON.parse(img.dataset.strokes || '[]'); } catch {}
+                    setLightbox({ url: img.dataset.original || img.src, strokes });
+                  }, 480);
+                },
+                onTouchMove: (e) => {
+                  if (!inlineImgLongPressTimer.current || !inlineImgLongPressStart.current) return;
+                  const t = e.touches[0];
+                  if (!t) return;
+                  const dx = t.clientX - inlineImgLongPressStart.current.x;
+                  const dy = t.clientY - inlineImgLongPressStart.current.y;
+                  if (Math.hypot(dx, dy) > 10) {
+                    clearTimeout(inlineImgLongPressTimer.current);
+                    inlineImgLongPressTimer.current = null;
+                  }
+                },
+                onTouchEnd: (e) => {
+                  if (inlineImgLongPressTimer.current) {
+                    clearTimeout(inlineImgLongPressTimer.current);
+                    inlineImgLongPressTimer.current = null;
+                  }
+                  if (inlineImgLongPressFired.current) {
+                    e.preventDefault();
+                    inlineImgLongPressFired.current = false;
+                  }
+                  inlineImgLongPressStart.current = null;
                 },
                 onInput: () => {
                   const html = bodyRef.current?.innerHTML || '';
