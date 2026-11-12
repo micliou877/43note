@@ -138,6 +138,9 @@
   .note-body table.side-by-side { width: 100%; border-collapse: collapse; table-layout: fixed; margin: 6px 0; }
   .note-body table.side-by-side td.sbs-col { vertical-align: top; padding: 8px 10px; border: 1px dashed #cbd5e1; border-radius: 4px; min-width: 0; outline: none; }
   .note-body table.side-by-side td.sbs-col:focus { border-color: #0d9488; }
+  .note-body .note-tag { display: inline-flex; align-items: center; gap: 2px; background: #ccfbf1; color: #0f766e;
+    border: 1px solid #5eead4; border-radius: 999px; padding: 1px 9px; font-size: 0.92em; cursor: pointer; user-select: none; white-space: nowrap; }
+  .note-body .note-tag:hover { background: #99f6e4; }
   /* 字級輸入框：拿掉瀏覽器原生的上下微調箭頭，不然跟 datalist 下拉圖示擠在一起，
      窄欄位裡數字會被擠到看不見（已經有 A- / A+ 按鈕可以微調了，不需要原生箭頭）。 */
   .note-fontsize-input::-webkit-inner-spin-button,
@@ -163,6 +166,7 @@
     .note-body img[data-inline] { cursor: default !important; break-inside: avoid; }
     .note-body table.side-by-side { break-inside: avoid; }
     .note-body table.side-by-side td.sbs-col { border-style: solid; border-color: #e5e7eb; }
+    .note-body .note-tag { cursor: default !important; }
     .note-body .page-break { page-break-before: always; break-before: page; border: none !important;
       padding: 0 !important; margin: 0 !important; height: 0 !important; font-size: 0 !important; color: transparent !important; overflow: hidden; }
     /* 標記本身連同它後面所有同層級的內容（每一行在 note-body 底下都是獨立的 <div>）都不印出來 */
@@ -210,7 +214,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/11/10 11:32";
+const BUILD_TIME = "2026/11/12 11:33";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -2056,6 +2060,9 @@ function App() {
   const [allNotesForSearch, setAllNotesForSearch] = useState([]);
   const [allTasksForSearch, setAllTasksForSearch] = useState([]);
   const [searchJumpRequest, setSearchJumpRequest] = useState(null); // 從搜尋結果點筆記時，記錄要跳去哪個筆記、高亮哪個關鍵字
+  const [noteTagPicker, setNoteTagPicker] = useState(false); // 插入「標記筆記」時的選擇視窗開關
+  const [noteTagQuery, setNoteTagQuery] = useState('');
+  const [noteNavStack, setNoteNavStack] = useState([]); // 點筆記標記連結過去時，記錄從哪裡來，才能「返回」
   const [showAllTasks, setShowAllTasks] = useState(true);
   const [allTasksFull, setAllTasksFull] = useState([]);
   const [allTasksFilter, setAllTasksFilter] = useState('pending');
@@ -2302,13 +2309,13 @@ function App() {
   }, [user]);
 
   useEffect(() => {
-    if (!user || !globalSearchOpen) { setAllNotesForSearch([]); setAllTasksForSearch([]); return; }
+    if (!user || !(globalSearchOpen || noteTagPicker)) { setAllNotesForSearch([]); setAllTasksForSearch([]); return; }
     const unsubN = onSnapshot(query(collection(db, `users/${user.uid}/notes`), where('deleted', '==', false)),
       snap => setAllNotesForSearch(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const unsubT = onSnapshot(query(collection(db, `users/${user.uid}/tasks`), where('deleted', '==', false)),
       snap => setAllTasksForSearch(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     return () => { unsubN(); unsubT(); };
-  }, [user, globalSearchOpen]);
+  }, [user, globalSearchOpen, noteTagPicker]);
 
   useEffect(() => {
     const handler = (e) => {
@@ -3202,6 +3209,65 @@ function App() {
       '<td class="sbs-col" contenteditable="true"><div>在這裡輸入…</div></td>' +
       '<td class="sbs-col" contenteditable="true"><div>在這裡輸入…</div></td>' +
       '</tr></tbody></table><div><br></div>');
+  };
+  // 開啟「標記筆記」選擇視窗前，先存下目前游標位置（視窗一開焦點會離開筆記本文，
+  // 選完筆記要插入標記時，得先把游標還原回來才插得到正確位置）
+  const openNoteTagPicker = () => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && bodyRef.current && bodyRef.current.contains(sel.anchorNode)) {
+      savedSelRangeRef.current = sel.getRangeAt(0).cloneRange();
+    }
+    setNoteTagQuery('');
+    setNoteTagPicker(true);
+  };
+  const confirmInsertNoteTag = (note) => {
+    setNoteTagPicker(false);
+    const body = bodyRef.current; if (!body) return;
+    body.focus();
+    if (savedSelRangeRef.current) {
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(savedSelRangeRef.current);
+    }
+    const title = note.title || '未命名筆記';
+    const safeTitle = title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    document.execCommand('insertHTML', false,
+      `<span class="note-tag" contenteditable="false" data-note-id="${note.id}" data-project-id="${note.projectId || ''}">🔗 ${safeTitle}</span>&nbsp;`);
+  };
+  // 依 noteId 把某篇筆記（跟它所屬的專案）打開；筆記資料用 getDoc 直接抓最新的一份，
+  // 不依賴全域搜尋那份只有在搜尋視窗開著時才會載入的清單
+  const openNoteById = async (noteId, projectId) => {
+    if (!noteId || !user) return false;
+    try {
+      const snap = await getDoc(doc(db, `users/${user.uid}/notes/${noteId}`));
+      if (!snap.exists()) return false;
+      const note = { id: snap.id, ...snap.data() };
+      const proj = projects.find(p => p.id === (projectId || note.projectId));
+      saveIfDirtyRef.current?.();
+      setSaveStatus('idle');
+      setShowAllTasks(false);
+      setShowTrash(false);
+      if (proj) setActiveProject(proj);
+      setActiveNote(note);
+      setSearch('');
+      setTab('notes');
+      setMobileView('editor');
+      clearSelImg();
+      return true;
+    } catch (err) { console.error(err); return false; }
+  };
+  // 點筆記本文裡的標記連結過去：先把目前這篇記到返回堆疊，再跳過去
+  const navigateToTaggedNote = async (noteId, projectId) => {
+    const from = activeNote ? { projectId: activeProject?.id || activeNote.projectId, noteId: activeNote.id, title: activeNote.title || '未命名筆記' } : null;
+    if (from) setNoteNavStack(stack => [...stack, from]);
+    const ok = await openNoteById(noteId, projectId);
+    if (!ok && from) setNoteNavStack(stack => stack.slice(0, -1)); // 連結失效（筆記可能被刪了），還原剛剛推進去的堆疊
+  };
+  const goBackNote = async () => {
+    if (!noteNavStack.length) return;
+    const prev = noteNavStack[noteNavStack.length - 1];
+    const ok = await openNoteById(prev.noteId, prev.projectId);
+    if (ok) setNoteNavStack(stack => stack.slice(0, -1));
   };
   // 對選取範圍逐一套用 perRangeFn（回傳處理後的節點，供最後定位游標用）。
   // 每一行在 note-body 底下都是獨立的 <div>（Chrome contenteditable 換行機制），
@@ -5292,6 +5358,11 @@ function App() {
             h('div', { className: 'no-print', style: { position: 'sticky', top: 0, zIndex: 10, background: '#f8fafc', paddingBottom: 4, boxShadow: '0 2px 4px rgba(0,0,0,0.06)' } },
             // 👇 這是優化防擠壓，且使用原生 Label 的工具列
             h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12, paddingBottom: 16, marginBottom: 12, borderBottom: '1px solid #f1f5f9' } },
+              noteNavStack.length > 0 && h('div', {
+                onClick: goBackNote,
+                title: '返回連結過來的那篇筆記',
+                style: { display: 'flex', alignItems: 'center', gap: 4, fontSize: 12.5, color: '#0d9488', cursor: 'pointer', width: 'fit-content' }
+              }, `← 返回「${noteNavStack[noteNavStack.length - 1].title}」`),
               h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, width: '100%' } },
                 h('button', { className: 'mobile-only', onClick: () => setMobileView('list'), style: { background: 'none', border: 'none', fontSize: 28, padding: '0 8px 0 0', cursor: 'pointer', color: '#64748b' } }, '‹'),
                 h('input', { value: activeNote.title || '', onChange: (e) => updateNoteFields({ title: e.target.value }), placeholder: '筆記標題', style: { ...S.titleInput, width: '100%', minWidth: 0 } }),
@@ -5472,7 +5543,9 @@ function App() {
                   h('button', { onMouseDown: (e) => { e.preventDefault(); insertPrintStop(); },
                     style: S.fmtBtn, title: '插入「以下不列印」標記，這裡之後的內容列印/匯出PDF/匯出Word都會跳過（畫面上還是看得到）' }, '⛔ 以下不印'),
                   h('button', { onMouseDown: (e) => { e.preventDefault(); insertSideBySide(); },
-                    style: S.fmtBtn, title: '插入左右並排的兩欄文字區塊，兩邊可以各自獨立輸入內容' }, '⬌ 並排欄')
+                    style: S.fmtBtn, title: '插入左右並排的兩欄文字區塊，兩邊可以各自獨立輸入內容' }, '⬌ 並排欄'),
+                  h('button', { onMouseDown: (e) => { e.preventDefault(); openNoteTagPicker(); },
+                    style: S.fmtBtn, title: '標記另一篇筆記，插入後點一下就能連結過去' }, '🔗 標記筆記')
                 ),
                 h('div', { style: { display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 } },
                   h('button', { onClick: undoBodyEdit, disabled: !canBodyUndo, title: '上一步 (Ctrl+Z)',
@@ -5498,6 +5571,12 @@ function App() {
                   if (mark && mark.parentElement) {
                     e.preventDefault();
                     toggleLiCollapse(mark.parentElement);
+                    return;
+                  }
+                  const tagEl = e.target.closest?.('.note-tag');
+                  if (tagEl) {
+                    e.preventDefault();
+                    navigateToTaggedNote(tagEl.dataset.noteId, tagEl.dataset.projectId);
                     return;
                   }
                   const img = e.target.tagName === 'IMG' && e.target.dataset.inline ? e.target : null;
@@ -5947,6 +6026,35 @@ function App() {
             )
         ),
         h('button', { onClick: () => setFolderMenu(null), style: { ...S.ghostBtn, width: '100%', marginTop: 4 } }, '取消')
+      )
+    ),
+    noteTagPicker && h('div', { style: S.modalOverlay, onClick: () => setNoteTagPicker(false) },
+      h('div', { style: { ...S.modalCard, maxWidth: 360, maxHeight: '75vh', display: 'flex', flexDirection: 'column' }, onClick: e => e.stopPropagation() },
+        h('h3', { style: S.modalTitle }, '標記筆記'),
+        h('input', { autoFocus: true, value: noteTagQuery, onChange: e => setNoteTagQuery(e.target.value),
+          placeholder: '搜尋筆記標題…', style: { ...S.modalInput, marginBottom: 10 } }),
+        h('div', { style: { overflowY: 'auto', flex: 1 } },
+          allNotesForSearch.length === 0
+            ? h('div', { style: S.empty }, '載入中…')
+            : (() => {
+                const q = noteTagQuery.trim();
+                const list = allNotesForSearch
+                  .filter(n => n.id !== activeNote?.id)
+                  .filter(n => !q || ciIncludes(n.title, q))
+                  .sort((a, b) => getSafeTime(b.updated || b.created) - getSafeTime(a.updated || a.created))
+                  .slice(0, 80);
+                return list.length === 0
+                  ? h('div', { style: S.empty }, '找不到符合的筆記')
+                  : list.map(n => h('div', {
+                      key: n.id, onClick: () => confirmInsertNoteTag(n),
+                      style: { padding: '9px 12px', cursor: 'pointer', borderRadius: 8, border: '1px solid #e5e7eb', marginBottom: 6 }
+                    },
+                      h('div', { style: { fontSize: 14, color: '#1f2937', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, n.title || '未命名筆記'),
+                      h('div', { style: { fontSize: 11, color: '#94a3b8', marginTop: 2 } }, projects.find(p => p.id === n.projectId)?.name || '')
+                    ));
+              })()
+        ),
+        h('button', { onClick: () => setNoteTagPicker(false), style: { ...S.ghostBtn, width: '100%', marginTop: 8 } }, '取消')
       )
     ),
     globalSearchModal
