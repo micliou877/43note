@@ -409,7 +409,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/11/26 20:12";
+const BUILD_TIME = "2026/11/26 20:44";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -3033,7 +3033,8 @@ function App() {
       setActiveProject({ id: docRef.id, name });
       setActiveNote(null);
       setMobileView('list'); // 建立完自動切換到列表
-    } catch (err) { alert("新增專案失敗：" + err.message); }
+      notify(`已建立專案「${name}」`, 'success', 1800);
+    } catch (err) { notify("新增專案失敗：" + err.message, 'error', 4000); }
   };
   const renameProject = async (id, name) => {
     await updateDoc(doc(db, `users/${user.uid}/projects/${id}`), { name });
@@ -3104,7 +3105,7 @@ function App() {
       const docRef = await addDoc(collection(db, `users/${user.uid}/notes`), newNote);
       setActiveNote({ id: docRef.id, ...newNote });
       setMobileView('editor'); // 新增筆記後，手機自動切到編輯畫面
-    } catch (err) { alert("新增筆記失敗：" + err.message); }
+    } catch (err) { notify("新增筆記失敗：" + err.message, 'error', 4000); }
   };
   
   const updateNoteFields = (patch) => {
@@ -3144,8 +3145,8 @@ function App() {
     try {
       await updateDoc(doc(db, `users/${user.uid}/notes/${activeNote.id}`), { ...patch, updated: serverTimestamp() });
     } catch (err) {
-      if (err.message.includes('exceeds')) alert("筆記太大了（超過 1MB）。請刪除幾張照片。");
-      else alert("儲存失敗：" + err.message);
+      if (err.message.includes('exceeds')) notify("筆記太大了（超過 1MB），請刪除幾張照片。", 'error', 4500);
+      else notify("儲存失敗：" + err.message, 'error', 4000);
       throw err;
     }
   };
@@ -4054,15 +4055,17 @@ function App() {
           img.dataset.path = path;
           img.dataset.strokes = JSON.stringify(strokes || []);
           updateNoteFields({ body: bodyRef.current.innerHTML });
-        } catch (err) { alert('標註儲存失敗，請重試：' + err.message); }
+          notify('標註已儲存', 'success', 1600);
+        } catch (err) { notify('標註儲存失敗，請重試：' + err.message, 'error', 4000); }
       }
     } else if (annotating.type === 'task') {
       const task = tasks.find(t => t.id === annotating.id);
       const imgs = task.images.map((im, i) => i === annotating.imgIndex ? { ...im, strokes, grayscale } : im);
       await updateDoc(doc(db, `users/${user.uid}/tasks/${annotating.id}`), { images: imgs });
+      notify('標註已儲存', 'success', 1600);
     } else {
       const img = noteImages[annotating.imgIndex];
-      if (img) await updateDoc(imgDoc(img.id), { strokes, grayscale });
+      if (img) { await updateDoc(imgDoc(img.id), { strokes, grayscale }); notify('標註已儲存', 'success', 1600); }
     }
     setAnnotating(null);
   };
@@ -4079,19 +4082,22 @@ function App() {
           img.dataset.strokes = '[]';
           updateNoteFields({ body: bodyRef.current.innerHTML });
           setSelImg(s => (s && s.imgId === cropping.imgId) ? { ...s, src: url, rect: img.getBoundingClientRect() } : s);
-        } catch (err) { alert('裁切儲存失敗，請重試：' + err.message); }
+          notify('裁切已套用', 'success', 1600);
+        } catch (err) { notify('裁切儲存失敗，請重試：' + err.message, 'error', 4000); }
       }
     } else if (cropping.type === 'task') {
       const task = tasks.find(t => t.id === cropping.id);
       const newImages = task.images.map((im, i) => i === cropping.imgIndex ? { ...im, dataUrl, strokes: [] } : im);
       await updateDoc(doc(db, `users/${user.uid}/tasks/${cropping.id}`), { images: newImages });
+      notify('裁切已套用', 'success', 1600);
     } else {
       const img = noteImages[cropping.imgIndex];
       if (img) {
         try {
           const { url, path } = await uploadInlineEdit(activeNote.id, dataUrl);
           await updateDoc(imgDoc(img.id), { url, path, strokes: [], dataUrl: deleteField() });
-        } catch (err) { alert('裁切儲存失敗，請重試：' + err.message); }
+          notify('裁切已套用', 'success', 1600);
+        } catch (err) { notify('裁切儲存失敗，請重試：' + err.message, 'error', 4000); }
       }
     }
     setCropping(null);
@@ -4129,7 +4135,7 @@ function App() {
       img.dataset.strokes = '[]';
       updateNoteFields({ body: bodyRef.current.innerHTML });
       setSelImg(s => (s && s.imgId === imgId) ? { ...s, src: url, rect: img.getBoundingClientRect() } : s);
-    } catch (err) { alert('旋轉失敗：' + err.message); }
+    } catch (err) { notify('旋轉失敗：' + err.message, 'error', 4000); }
   };
   // 剪下：從目前位置移除，記在 imgClipboard 裡（不刪 Storage 檔案，因為等一下貼上還要用）。
   // 貼到同一篇筆記就直接重用原本的網址；貼到別篇筆記才真的搬檔案過去（見 pasteInlineImg）。
@@ -4162,15 +4168,12 @@ function App() {
     setUploading(true);
     try {
       let url = imgClipboard.src, path = imgClipboard.path || '';
-      // 複製的圖片、或剪下後貼到「別篇」筆記：都要真的複製一份檔案到目前這篇筆記底下，
-      // 不能共用同一個 Storage 檔案──不然以後任一邊刪除圖片，會把另一邊也弄壞。
-      // 剪下後貼回「同一篇」筆記，直接重用原本的網址就好，不用多傳一次。
       const needsCopy = imgClipboard.mode === 'copy' || imgClipboard.fromNoteId !== activeNote.id;
       if (needsCopy) {
         const blob = await (await fetch(imgClipboard.src)).blob();
         const newPath = `users/${user.uid}/notes/${activeNote.id}/inline/${uid()}.jpg`;
         url = await uploadImageBlob(newPath, blob);
-        if (imgClipboard.mode === 'cut' && imgClipboard.path) deleteImagePathQuiet(imgClipboard.path); // 真的搬家了，舊檔案可以刪
+        if (imgClipboard.mode === 'cut' && imgClipboard.path) deleteImagePathQuiet(imgClipboard.path);
         path = newPath;
       }
       const img = document.createElement('img');
@@ -4187,9 +4190,10 @@ function App() {
       sel.removeAllRanges();
       sel.addRange(range);
       updateNoteFields({ body: body.innerHTML });
-      if (imgClipboard.mode === 'cut') setImgClipboard(null); // 剪下是搬移，貼過一次就沒了
+      if (imgClipboard.mode === 'cut') setImgClipboard(null);
+      notify('圖片已貼上', 'success', 1600);
     } catch (err) {
-      alert('貼上圖片失敗：' + err.message);
+      notify('貼上圖片失敗：' + err.message, 'error', 4000);
     } finally {
       setUploading(false);
     }
@@ -4254,15 +4258,23 @@ function App() {
   const rotateImage = async (imgId, deg) => {
     const img = noteImages.find(im => im.id === imgId);
     if (!img) return;
-    // 標註座標是照原本方向記錄的，旋轉後方向變了、座標會對不上，所以旋轉一定會清空標註。
-    // 這是舊有的既定行為（沒辦法自動把標註轉到新方向），先跳出警告避免使用者沒注意到就
-    // 把辛苦畫的標註洗掉。
-    if (img.strokes?.length && !window.confirm('這張照片已經有標註，旋轉會清除目前的標註（無法保留），確定要繼續嗎？')) return;
-    try {
-      const newDataUrl = await rotateImageData(img.url || img.dataUrl, deg);
-      const { url, path } = await uploadInlineEdit(activeNote.id, newDataUrl);
-      await updateDoc(imgDoc(imgId), { url, path, strokes: [], dataUrl: deleteField() });
-    } catch (err) { alert('旋轉失敗：' + err.message); }
+    const doRotate = async () => {
+      try {
+        const newDataUrl = await rotateImageData(img.url || img.dataUrl, deg);
+        const { url, path } = await uploadInlineEdit(activeNote.id, newDataUrl);
+        await updateDoc(imgDoc(imgId), { url, path, strokes: [], dataUrl: deleteField() });
+        notify('照片已旋轉', 'success', 1600);
+      } catch (err) { notify('旋轉失敗：' + err.message, 'error', 4000); }
+    };
+    if (img.strokes?.length) {
+      askConfirm({
+        title: '旋轉照片並清除標註？',
+        message: '這張照片已有標註，旋轉後座標會對不上，目前的標註將被清除且無法復原。確定繼續嗎？',
+        danger: true, confirmText: '確定旋轉', onConfirm: doRotate
+      });
+      return;
+    }
+    await doRotate();
   };
 
   const onPickTaskImage = async (taskId, e) => {
@@ -4277,6 +4289,7 @@ function App() {
         newImages.push({ id: uid(), dataUrl, strokes: [], grayscale: false });
       }
       await updateDoc(doc(db, `users/${user.uid}/tasks/${taskId}`), { images: newImages });
+      notify('照片已加入任務', 'success', 1800);
     } catch (err) { reportDbError('加入照片失敗', err); }
   };
   const delTaskImage = async (taskId, imgIndex) => {
@@ -4286,15 +4299,25 @@ function App() {
     setConfirmDel(null);
   };
   const rotateTaskImage = async (taskId, imgIndex, deg) => {
-    try {
-      const task = tasks.find(t => t.id === taskId);
-      if (!task) return;
-      // 跟筆記照片庫一樣：標註座標對不上旋轉後的方向，旋轉一定會清空標註，先警告一下
-      if (task.images[imgIndex]?.strokes?.length && !window.confirm('這張照片已經有標註，旋轉會清除目前的標註（無法保留），確定要繼續嗎？')) return;
-      const newDataUrl = await rotateImageData(task.images[imgIndex].dataUrl, deg);
-      const newImages = task.images.map((im, i) => i === imgIndex ? { ...im, dataUrl: newDataUrl, strokes: [] } : im);
-      await updateDoc(doc(db, `users/${user.uid}/tasks/${taskId}`), { images: newImages });
-    } catch (err) { alert('旋轉失敗：' + err.message); }
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+    const doRotate = async () => {
+      try {
+        const newDataUrl = await rotateImageData(task.images[imgIndex].dataUrl, deg);
+        const newImages = task.images.map((im, i) => i === imgIndex ? { ...im, dataUrl: newDataUrl, strokes: [] } : im);
+        await updateDoc(doc(db, `users/${user.uid}/tasks/${taskId}`), { images: newImages });
+        notify('照片已旋轉', 'success', 1600);
+      } catch (err) { notify('旋轉失敗：' + err.message, 'error', 4000); }
+    };
+    if (task.images[imgIndex]?.strokes?.length) {
+      askConfirm({
+        title: '旋轉照片並清除標註？',
+        message: '這張照片已有標註，旋轉後座標會對不上，目前的標註將被清除且無法復原。確定繼續嗎？',
+        danger: true, confirmText: '確定旋轉', onConfirm: doRotate
+      });
+      return;
+    }
+    await doRotate();
   };
 
   // Tasks
@@ -4316,9 +4339,10 @@ function App() {
       await Promise.race([addPromise, timeout]);
       scrollToBottomRef.current = true;
       setNewTaskModal(false);
+      notify('已新增任務', 'success', 1800);
     } catch (err) {
-      if (err.message === "連線逾時") alert("新增失敗：連線逾時！\n\n👉 請檢查 Firebase 連線狀態。");
-      else alert("新增任務失敗：" + err.message);
+      if (err.message === "連線逾時") notify("新增失敗：連線逾時，請檢查 Firebase 連線狀態。", 'error', 4500);
+      else notify("新增任務失敗：" + err.message, 'error', 4500);
       throw err;
     }
   };
@@ -4331,44 +4355,51 @@ function App() {
       recurInterval: recurInterval || null,
     });
     setSetDueDateTask(null);
+    notify(dueDate ? '已更新截止日期' : '已清除截止日期', 'success', 1800);
   };
   const completeTask = async (reason, relayPayload) => {
-    const task = tasks.find(t => t.id === completeTaskId) || allTasksFull.find(t => t.id === completeTaskId);
-    await updateDoc(doc(db, `users/${user.uid}/tasks/${completeTaskId}`), {
-      done: true, doneReason: reason, doneAt: serverTimestamp()
-    });
-    if (task && task.recur && task.dueDate) {
-      const nextDate = nextOccurrenceDate(task.dueDate, task.recur, task.recurInterval);
-      await addDoc(collection(db, `users/${user.uid}/tasks`), {
-        projectId: task.projectId, title: task.title, done: false, deleted: false, images: [],
-        pinned: false, sortOrder: Date.now(), created: serverTimestamp(),
-        dueDate: toLocalDTStr(nextDate), reminderOffset: task.reminderOffset ?? null,
-        reminded: false, recur: task.recur, recurInterval: task.recurInterval ?? null,
+    try {
+      const task = tasks.find(t => t.id === completeTaskId) || allTasksFull.find(t => t.id === completeTaskId);
+      await updateDoc(doc(db, `users/${user.uid}/tasks/${completeTaskId}`), {
+        done: true, doneReason: reason, doneAt: serverTimestamp()
       });
-    }
-    if (task && relayPayload) {
-      await addDoc(collection(db, `users/${user.uid}/tasks`), {
-        projectId: task.projectId, title: relayPayload.title, done: false, deleted: false, images: [],
-        pinned: false, sortOrder: Date.now(), created: serverTimestamp(),
-        dueDate: relayPayload.dueDate, reminderOffset: relayPayload.reminderOffset,
-        reminded: false, recur: relayPayload.recur, recurInterval: relayPayload.recurInterval,
-        noteIds: relayPayload.noteIds,
-      });
-      if (!activeProject || activeProject.id !== task.projectId || tab !== 'tasks' || showAllTasks) {
-        const proj = projects.find(p => p.id === task.projectId);
-        if (proj) setActiveProject(proj);
-        setShowAllTasks(false);
-        setTab('tasks');
-        setMobileView('list');
+      if (task && task.recur && task.dueDate) {
+        const nextDate = nextOccurrenceDate(task.dueDate, task.recur, task.recurInterval);
+        await addDoc(collection(db, `users/${user.uid}/tasks`), {
+          projectId: task.projectId, title: task.title, done: false, deleted: false, images: [],
+          pinned: false, sortOrder: Date.now(), created: serverTimestamp(),
+          dueDate: toLocalDTStr(nextDate), reminderOffset: task.reminderOffset ?? null,
+          reminded: false, recur: task.recur, recurInterval: task.recurInterval ?? null,
+        });
       }
+      if (task && relayPayload) {
+        await addDoc(collection(db, `users/${user.uid}/tasks`), {
+          projectId: task.projectId, title: relayPayload.title, done: false, deleted: false, images: [],
+          pinned: false, sortOrder: Date.now(), created: serverTimestamp(),
+          dueDate: relayPayload.dueDate, reminderOffset: relayPayload.reminderOffset,
+          reminded: false, recur: relayPayload.recur, recurInterval: relayPayload.recurInterval,
+          noteIds: relayPayload.noteIds,
+        });
+        if (!activeProject || activeProject.id !== task.projectId || tab !== 'tasks' || showAllTasks) {
+          const proj = projects.find(p => p.id === task.projectId);
+          if (proj) setActiveProject(proj);
+          setShowAllTasks(false);
+          setTab('tasks');
+          setMobileView('list');
+        }
+      }
+      scrollToBottomRef.current = true;
+      setOverdueModal(prev => {
+        if (!prev) return prev;
+        const next = prev.filter(x => x.id !== completeTaskId);
+        return next.length ? next : null;
+      });
+      setCompleteTaskId(null);
+      notify(relayPayload ? '任務已完成並建立後續接力任務' : '任務已完成', 'success', 2200);
+    } catch (err) {
+      notify('完成任務失敗：' + (err?.message || err), 'error', 4000);
+      throw err;
     }
-    scrollToBottomRef.current = true;
-    setOverdueModal(prev => {
-      if (!prev) return prev;
-      const next = prev.filter(x => x.id !== completeTaskId);
-      return next.length ? next : null;
-    });
-    setCompleteTaskId(null);
   };
   const uncompleteTask = async (id) => {
     await updateDoc(doc(db, `users/${user.uid}/tasks/${id}`), {
@@ -5858,7 +5889,11 @@ function App() {
       dbError && h('div', { style: { background: 'var(--danger-soft)', color: 'var(--danger)', border: '1px solid var(--danger-border)', padding: '9px 12px', margin: '10px 12px 0', borderRadius: 8, fontSize: 12.5, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 } },
         h(Icon, { name: 'alertTriangle', size: 14 }), dbError),
 
-      (tab === 'notes' || tab === 'tasks') && h('div', { style: S.searchBox },
+      (tab === 'notes' || tab === 'tasks') && h('div', {
+        style: fullWidthProjectTab
+          ? { ...S.searchBox, maxWidth: 920, width: 'calc(100% - 40px)', margin: '14px auto 4px', background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-xs)' }
+          : S.searchBox
+      },
         h(Icon, { name: 'search', size: 14, color: 'var(--text-faint)' }),
         h('input', { className: 'no-focus-ring', value: search, onChange: (e) => setSearch(e.target.value), placeholder: tab === 'tasks' ? '搜尋任務…' : '搜尋筆記…', style: S.searchInput }),
         search && h('button', { className: 'btn-icon', onClick: () => setSearch(''), style: { padding: 2 } }, h(Icon, { name: 'x', size: 13 })),
@@ -5972,15 +6007,21 @@ function App() {
             ]
           );
         })(),
-        tab === 'tasks' && h('div', null,
-          h('div', { style: { display: 'flex', alignItems: 'center', padding: '6px 14px', borderBottom: '1px solid var(--border-subtle)', gap: 4 } },
-            h('span', { style: { fontSize: 11, color: 'var(--text-faint)' } }, '排序'),
+        tab === 'tasks' && h('div', {
+          style: fullWidthProjectTab
+            ? { maxWidth: 920, width: 'calc(100% - 40px)', margin: '10px auto 28px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow-xs)', overflow: 'hidden' }
+            : undefined
+        },
+          h('div', { style: { display: 'flex', alignItems: 'center', padding: fullWidthProjectTab ? '9px 16px' : '6px 14px', borderBottom: '1px solid var(--border-subtle)', gap: 6, background: fullWidthProjectTab ? 'var(--bg-subtle)' : 'transparent' } },
+            h('span', { style: { fontSize: 11.5, color: 'var(--text-faint)' } }, '排序'),
             h('select', { value: taskSort, onChange: (e) => setTaskSort(e.target.value),
-              style: { border: 'none', background: 'transparent', color: 'var(--text-muted)', fontSize: 11.5, cursor: 'pointer', outline: 'none' } },
+              style: { border: 'none', background: 'transparent', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer', outline: 'none', fontWeight: 500 } },
               h('option', { value: 'created' }, '建立時間'),
               h('option', { value: 'name' }, '名稱 A-Z'),
               h('option', { value: 'due' }, '截止日期'),
-              h('option', { value: 'done' }, '未完成優先'))
+              h('option', { value: 'done' }, '未完成優先')),
+            h('span', { className: 'tabular', style: { marginLeft: 'auto', fontSize: 11.5, color: 'var(--text-faint)' } },
+              `${filteredTasks.filter(t => !t.done).length} 待完成 · ${filteredTasks.filter(t => t.done).length} 已完成`)
           ),
           filteredTasks.length === 0 && h('div', { style: S.empty }, search ? '找不到符合的任務' : '點「新任務」開始'),
           ...filteredTasks.map(t =>
@@ -6617,7 +6658,7 @@ function App() {
                           }
                           updateNoteFields({ body: bodyRef.current?.innerHTML || '' });
                         } catch (err) {
-                          alert('圖片上傳失敗，請重新貼上一次：' + err.message);
+                          notify('圖片上傳失敗，請重新貼上一次：' + err.message, 'error', 4000);
                         } finally {
                           setUploading(false);
                         }
