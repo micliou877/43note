@@ -318,6 +318,7 @@
   .note-body img[data-inline].img-sel { outline: 2px solid var(--accent); }
   .note-body img[data-inline].img-border { border: 2px solid var(--text-muted); }
   .note-body { overflow: hidden; position: relative; }
+  .note-body::after { content: ""; display: table; clear: both; }
   .note-body-readmode { cursor: default; }
   .note-body-readmode img[data-inline] { cursor: default; }
   .note-body img[data-inline].img-row { float: left !important; margin: 3px 1% 8px 0 !important; }
@@ -331,13 +332,13 @@
   .note-body .li-toggle-mark::before { content: '▼'; }
   .note-body [data-collapsed="1"] > .li-toggle-mark::before { content: '▶'; }
   .note-body [data-li-hidden="1"] { display: none !important; }
-  .note-body .page-break { display: block; text-align: center; font-size: 12.5px; font-weight: 600; color: var(--accent);
+  .note-body .page-break { display: block; clear: both; text-align: center; font-size: 12.5px; font-weight: 600; color: var(--accent);
     padding: 8px 0; margin: 14px 0; border-top: 2px dashed var(--accent); border-bottom: 2px dashed var(--accent); background: var(--accent-soft); user-select: none; cursor: pointer; border-radius: 4px; }
   .note-body .page-break.break-sel { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
-  .note-body .print-stop { display: block; text-align: center; font-size: 12.5px; font-weight: 600; color: var(--warning);
+  .note-body .print-stop { display: block; clear: both; text-align: center; font-size: 12.5px; font-weight: 600; color: var(--warning);
     padding: 8px 0; margin: 14px 0; border-top: 2px dashed var(--warning); border-bottom: 2px dashed var(--warning); background: var(--warning-soft); user-select: none; cursor: pointer; border-radius: 4px; }
   .note-body .print-stop.break-sel { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
-  .note-body table.side-by-side { width: 100%; border-collapse: collapse; table-layout: fixed; margin: 8px 0; }
+  .note-body table.side-by-side { width: 100%; clear: both; border-collapse: collapse; table-layout: fixed; margin: 8px 0; }
   .note-body table.side-by-side td.sbs-col { vertical-align: top; padding: 10px 12px; border: 1px dashed var(--border-strong); border-radius: 4px; min-width: 0; outline: none; }
   .note-body table.side-by-side td.sbs-col:focus { border-color: var(--accent); }
   .note-body .note-tag { display: inline-flex; align-items: center; gap: 3px; background: var(--accent-soft); color: var(--accent);
@@ -346,17 +347,64 @@
   .note-fontsize-input::-webkit-inner-spin-button,
   .note-fontsize-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
   .note-fontsize-input { -moz-appearance: textfield; }
-  .print-only-title { display: none; }
+
+  /* A4 所見即所得紙張模式（210mm 紙寬 − 左右各 18mm = 174mm 內容寬，與 @page 完全 1:1 同步） */
+  .a4-sheet { position: relative; display: flex; flex-direction: column; flex: 1; }
+  .a4-sheet.is-a4 {
+    width: 210mm; max-width: 100%; margin: 14px auto 28px; padding: 18mm;
+    background: #ffffff; color: #1f2937;
+    border: 1px solid var(--border); border-radius: 6px;
+    box-shadow: var(--shadow-md); min-height: 297mm; flex: none;
+  }
+  .a4-sheet.is-a4 .note-body {
+    border: none !important; border-radius: 0 !important; padding: 0 !important;
+    background: transparent !important; box-shadow: none !important;
+    color: #1f2937 !important; font-size: 15px !important; line-height: 1.75 !important;
+    overflow: visible !important; min-height: 220mm !important;
+  }
+  .a4-sheet.is-a4 .note-body blockquote { border-left-color: #cbd5e1; color: #64748b; }
+  .a4-print-title {
+    display: none; font-size: 22px; font-weight: 700; line-height: 1.35;
+    color: #0f172a; margin: 0 0 12px; padding: 0; letter-spacing: -0.015em;
+  }
+  .a4-sheet.is-a4 .a4-print-title { display: block; }
+  .a4-page-guide {
+    position: absolute; left: 0; right: 0; pointer-events: none; z-index: 6;
+    border-top: 1.5px dashed rgba(13, 148, 136, 0.45);
+    display: flex; justify-content: center;
+  }
+  .a4-page-guide span {
+    transform: translateY(-50%); background: #f0fdfa; color: #0f766e;
+    border: 1px solid #99f6e4; border-radius: 99px;
+    padding: 1px 10px; font-size: 10.5px; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  @media (max-width: 768px) {
+    .a4-sheet.is-a4 { width: 100%; margin: 8px 0 20px; padding: 14px; min-height: 60dvh; border-radius: 10px; }
+    .a4-page-guide { display: none !important; }
+  }
+
   @media print {
     .note-body, .note-body * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
     aside, section, .resize-handle, .no-print, .toast-stack { display: none !important; }
-    .print-only-title { display: block !important; font-size: 22px; font-weight: 700; color: #1f2937; margin: 0 0 12px; padding: 0; }
-    html, body { height: auto !important; background: white !important; color: #1f2937 !important; }
+    .a4-print-title { display: block !important; font-size: 22px !important; font-weight: 700 !important; line-height: 1.35 !important; color: #0f172a !important; margin: 0 0 12px !important; padding: 0 !important; }
+    html, body { height: auto !important; background: white !important; color: #1f2937 !important; margin: 0 !important; padding: 0 !important; }
     #root > div { height: auto !important; overflow: visible !important; display: block !important; background: white !important; }
     main { overflow: visible !important; height: auto !important; flex: none !important; display: block !important; background: white !important; }
-    main > div { overflow: visible !important; height: auto !important; flex: none !important; background: white !important; }
-    .note-body { overflow: visible !important; min-height: 0 !important; max-height: none !important; border: none !important; border-radius: 0 !important; background: white !important; color: #1f2937 !important; box-shadow: none !important; }
-    .note-body [data-li-hidden="1"] { display: block !important; }
+    main > div { overflow: visible !important; height: auto !important; flex: none !important; background: white !important; padding: 0 !important; margin: 0 !important; }
+    .a4-sheet, .a4-sheet.is-a4 {
+      width: 100% !important; max-width: none !important; min-height: 0 !important;
+      margin: 0 !important; padding: 0 !important; border: none !important;
+      border-radius: 0 !important; box-shadow: none !important; background: white !important;
+    }
+    .note-body {
+      overflow: visible !important; min-height: 0 !important; max-height: none !important;
+      border: none !important; border-radius: 0 !important; padding: 0 !important; margin: 0 !important;
+      background: white !important; color: #1f2937 !important; box-shadow: none !important;
+      font-size: 15px !important; line-height: 1.75 !important;
+    }
+    /* 照畫面展開/收合狀態列印：收合的保持隱藏，只藏掉編輯用三角標記 */
+    .note-body [data-li-hidden="1"] { display: none !important; }
     .note-body .li-toggle-mark { display: none !important; }
     .note-body img[data-inline]:hover, .note-body img[data-inline].img-sel { outline: none !important; }
     .note-body img[data-inline] { cursor: default !important; break-inside: avoid; }
@@ -366,6 +414,9 @@
     .note-body .page-break { page-break-before: always; break-before: page; border: none !important;
       padding: 0 !important; margin: 0 !important; height: 0 !important; font-size: 0 !important; color: transparent !important; overflow: hidden; }
     .note-body .print-stop, .note-body .print-stop ~ * { display: none !important; }
+    .note-img-grid { display: grid !important; grid-template-columns: repeat(2, 1fr) !important; gap: 10px !important; margin-top: 14px !important; }
+    .note-img-grid > div { break-inside: avoid; border: 1px solid #e5e7eb !important; box-shadow: none !important; background: white !important; }
+    .note-img-grid canvas { max-height: none !important; height: auto !important; object-fit: contain !important; }
     @page { margin: 18mm; size: A4; }
   }
 </style>
@@ -409,7 +460,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/11/26 20:44";
+const BUILD_TIME = "2026/11/26 21:10";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -2601,7 +2652,27 @@ function App() {
   const [focusMode, setFocusMode] = useState(false); // 寫筆記時可切換全螢幕，隱藏左側專案/筆記列表
   const [readMode, setReadMode] = useState(false); // 手機上的純閱讀模式：隱藏編輯工具列、關掉 contentEditable，避免誤觸鍵盤
   const [toolbarOpen, setToolbarOpen] = useState(() => localStorage.getItem('noteToolbarOpen') !== '0'); // 手機上可收合工具列（存/匯出按鈕＋格式列），編輯功能仍在，只是先藏起來省空間
+  const [a4Mode, setA4Mode] = useState(() => localStorage.getItem('noteA4Mode') !== '0'); // A4 所見即所得紙張模式（寬度與分頁參考線與輸出 PDF 1:1 同步）
+  const [a4PageCount, setA4PageCount] = useState(1);
+  const a4SheetRef = useRef(null);
   useEffect(() => { localStorage.setItem('noteToolbarOpen', toolbarOpen ? '1' : '0'); }, [toolbarOpen]);
+  useEffect(() => { localStorage.setItem('noteA4Mode', a4Mode ? '1' : '0'); }, [a4Mode]);
+  useEffect(() => {
+    if (!a4Mode || !isDesktop || !activeNote?.id) { setA4PageCount(1); return; }
+    const el = a4SheetRef.current;
+    if (!el) return;
+    const MM_TO_PX = 96 / 25.4;
+    const MARGIN_PX = 18 * MM_TO_PX * 2;
+    const PAGE_H_PX = 261 * MM_TO_PX;
+    const update = () => {
+      const contentH = Math.max(0, el.scrollHeight - MARGIN_PX);
+      setA4PageCount(Math.max(1, Math.ceil(contentH / PAGE_H_PX)));
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [a4Mode, isDesktop, activeNote?.id, activeNote?.body, activeNote?.title, noteImages.length]);
 
   const lastLocalEdit = useRef(0);
   const dragId        = useRef(null);
@@ -3204,20 +3275,14 @@ function App() {
   const exportToPDF = () => {
     const prev = document.title;
     document.title = activeNote?.title || '未命名筆記';
-    // 自由擺放圖片（.img-free）是 position:absolute，脫離文件流，位置永遠是相對整份
-    // 筆記「連續版面」算出來的。手動分頁點會讓瀏覽器在該處插入一段留白換到下一頁，
-    // 但這段留白不會反映在絕對定位圖片的座標裡，所以列印/匯出 PDF 時圖片常常跟丟、
-    // 跑到不對的那一頁。這裡的做法：列印前先暫時拿掉 img-free class，讓圖片退回一般
-    // 文件流內的圖片（跟著它原本在 HTML 裡的位置正常分頁），列印完再加回來，
-    // 讓編輯畫面看到的自由擺放效果不受影響。
     const body = bodyRef.current;
-    const freeImgs = body ? Array.from(body.querySelectorAll('img[data-inline].img-free')) : [];
+    // 只有在筆記內有「✂ 手動分頁」時，絕對定位的自由圖片才可能跨分頁錯位，此時暫時退回文件流；
+    // 若沒有手動分頁，在 A4 1:1 寬度下直接保留自由擺放座標，讓輸出 PDF 跟螢幕畫面完全一致。
+    const hasManualPageBreak = !!body?.querySelector('.page-break');
+    const freeImgs = (body && hasManualPageBreak) ? Array.from(body.querySelectorAll('img[data-inline].img-free')) : [];
     freeImgs.forEach(img => img.classList.remove('img-free'));
 
-    // 「⛔ 以下不印」標記之後的內容，列印前先暫時隱藏，列印完再復原。純 CSS 的一般兄弟選擇器
-    // 只找得到跟標記「同一層」的兄弟節點，如果標記因為編輯歷史被包在某層沒有樣式的 <div> 裡
-    // （常見於剪貼/復原留下的痕跡），就會漏掉外層的內容——改用 collectNodesAfterMarker 往上
-    // 逐層找，不管巢狀多深都抓得到。
+    // 「⛔ 以下不印」標記之後的內容，列印前先暫時隱藏，列印完再復原。
     const stopMark = body?.querySelector('.print-stop');
     const hiddenNodes = stopMark
       ? [...collectTrailingPageBreaks(stopMark, body), ...collectNodesAfterMarker(stopMark, body)]
@@ -6308,6 +6373,20 @@ function App() {
                   )
                 ),
 
+                // A4 紙張所見即所得切換（與輸出 PDF 寬度/斷行/分頁 1:1 同步）
+                h('button', {
+                  className: 'btn-ghost hide-on-mobile',
+                  onClick: () => setA4Mode(v => !v),
+                  title: a4Mode ? 'A4 紙張模式（所見即所得，與匯出 PDF 寬度一致）— 點擊切回寬螢幕' : '切換為 A4 紙張模式（即時預覽 PDF 排版與分頁線）',
+                  style: {
+                    ...S.ghostBtn, padding: '6px 10px',
+                    ...(a4Mode ? { color: 'var(--accent)', borderColor: 'var(--accent-border)', background: 'var(--accent-soft)', fontWeight: 600 } : {})
+                  }
+                },
+                  h(Icon, { name: 'printer', size: 14 }),
+                  a4Mode ? `A4 預覽 (${a4PageCount}頁)` : 'A4 預覽'
+                ),
+
                 // 更多操作下拉選單（手動存檔、容量、刪除）
                 h('div', { className: 'dropdown-wrap', style: { marginLeft: 'auto' } },
                   h('button', {
@@ -6348,7 +6427,7 @@ function App() {
               })
             ),
             // 精簡單行格式工具列
-            !readMode && h('div', { className: 'no-print fmt-bar-mobile' + (toolbarOpen ? '' : ' toolbar-collapsible-hide'), style: { ...S.fmtBar, justifyContent: 'space-between' } },
+            !readMode && h('div', { className: 'no-print fmt-bar-mobile' + (toolbarOpen ? '' : ' toolbar-collapsible-hide'), style: { ...S.fmtBar, justifyContent: 'space-between', borderRadius: (a4Mode && isDesktop) ? 10 : '10px 10px 0 0' } },
               h('div', { style: { display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' } },
                 h('button', { className: 'fmt-btn', onMouseDown: (e) => { e.preventDefault(); document.execCommand('bold'); bodyRef.current?.focus(); },
                   style: { ...S.fmtBtn, fontWeight: 700 }, title: '粗體 (Ctrl+B)' }, 'B'),
@@ -6513,8 +6592,16 @@ function App() {
               )
             ),
             ),
-            h('h1', { className: 'print-only-title' }, activeNote.title || '未命名筆記'),
-            h('div', {
+            h('div', { ref: a4SheetRef, className: 'a4-sheet' + (a4Mode && isDesktop ? ' is-a4' : '') },
+              a4Mode && isDesktop && a4PageCount > 1 && Array.from({ length: a4PageCount - 1 }, (_, i) =>
+                h('div', {
+                  key: `pg-${i + 1}`,
+                  className: 'a4-page-guide no-print',
+                  style: { top: `calc(18mm + ${(i + 1) * 261}mm)` }
+                }, h('span', null, `第 ${i + 1} 頁結束 · 第 ${i + 2} 頁開始`))
+              ),
+              h('h1', { className: 'a4-print-title' }, activeNote.title || '未命名筆記'),
+              h('div', {
                 ref: bodyRef,
                 contentEditable: !readMode,
                 suppressContentEditableWarning: true,
@@ -6805,7 +6892,7 @@ function App() {
                 style: { ...S.bodyArea, borderRadius: readMode ? 12 : '0 0 12px 12px', borderTop: readMode ? '1px solid var(--border)' : 'none',
                   minHeight: bodyExpanded ? 'calc(100dvh - 210px)' : 320, overflow: 'auto', resize: 'none' }
               }),
-            (noteImages.length > 0) && h('div', { style: S.imgGrid },
+            (noteImages.length > 0) && h('div', { className: 'note-img-grid', style: S.imgGrid },
               ...noteImages.map((im, i) =>
                 h(ImageCard, { key: im.id, image: im, index: i,
                   onView: () => setLightbox({ list: noteImages, index: i, onAnnotateIndex: (idx) => { setLightbox(null); setAnnotating({ type: 'note', imgIndex: idx }); } }),
@@ -6817,6 +6904,7 @@ function App() {
                   onRotateLeft: () => rotateImage(im.id, 270),
                   onRotateRight: () => rotateImage(im.id, 90),
                 })))
+            )
           )
     ),
 
