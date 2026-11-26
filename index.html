@@ -460,7 +460,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/11/26 21:10";
+const BUILD_TIME = "2026/11/26 21:13";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -2657,22 +2657,6 @@ function App() {
   const a4SheetRef = useRef(null);
   useEffect(() => { localStorage.setItem('noteToolbarOpen', toolbarOpen ? '1' : '0'); }, [toolbarOpen]);
   useEffect(() => { localStorage.setItem('noteA4Mode', a4Mode ? '1' : '0'); }, [a4Mode]);
-  useEffect(() => {
-    if (!a4Mode || !isDesktop || !activeNote?.id) { setA4PageCount(1); return; }
-    const el = a4SheetRef.current;
-    if (!el) return;
-    const MM_TO_PX = 96 / 25.4;
-    const MARGIN_PX = 18 * MM_TO_PX * 2;
-    const PAGE_H_PX = 261 * MM_TO_PX;
-    const update = () => {
-      const contentH = Math.max(0, el.scrollHeight - MARGIN_PX);
-      setA4PageCount(Math.max(1, Math.ceil(contentH / PAGE_H_PX)));
-    };
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [a4Mode, isDesktop, activeNote?.id, activeNote?.body, activeNote?.title, noteImages.length]);
 
   const lastLocalEdit = useRef(0);
   const dragId        = useRef(null);
@@ -2729,6 +2713,23 @@ function App() {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  useEffect(() => {
+    if (!a4Mode || !isDesktop || !activeNote?.id) { setA4PageCount(1); return; }
+    const el = a4SheetRef.current;
+    if (!el) return;
+    const MM_TO_PX = 96 / 25.4;
+    const MARGIN_PX = 18 * MM_TO_PX * 2;
+    const PAGE_H_PX = 261 * MM_TO_PX;
+    const update = () => {
+      const contentH = Math.max(0, el.scrollHeight - MARGIN_PX);
+      setA4PageCount(Math.max(1, Math.ceil(contentH / PAGE_H_PX)));
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [a4Mode, isDesktop, activeNote?.id, activeNote?.body, activeNote?.title, noteImages.length]);
 
   useEffect(() => { setGlobalSearchIdx(0); }, [globalSearchQuery, globalSearchFilter, globalSearchOpen]);
 
