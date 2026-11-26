@@ -371,12 +371,18 @@
   .a4-page-guide {
     position: absolute; left: 0; right: 0; pointer-events: none; z-index: 6;
     border-top: 1.5px dashed rgba(13, 148, 136, 0.45);
-    display: flex; justify-content: center;
+    display: flex; justify-content: flex-end; padding-right: 4mm;
   }
   .a4-page-guide span {
     transform: translateY(-50%); background: #f0fdfa; color: #0f766e;
     border: 1px solid #99f6e4; border-radius: 99px;
-    padding: 1px 10px; font-size: 10.5px; font-weight: 600;
+    padding: 1px 9px; font-size: 10.5px; font-weight: 600;
+    font-variant-numeric: tabular-nums; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  }
+  .a4-manual-badge {
+    position: absolute; right: 20mm; pointer-events: none; z-index: 7;
+    transform: translateY(-50%); background: #0d9488; color: #ffffff;
+    border-radius: 99px; padding: 1px 8px; font-size: 10px; font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
   @media (max-width: 768px) {
@@ -460,7 +466,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/11/26 21:13";
+const BUILD_TIME = "2026/11/26 21:28";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -2653,7 +2659,7 @@ function App() {
   const [readMode, setReadMode] = useState(false); // 手機上的純閱讀模式：隱藏編輯工具列、關掉 contentEditable，避免誤觸鍵盤
   const [toolbarOpen, setToolbarOpen] = useState(() => localStorage.getItem('noteToolbarOpen') !== '0'); // 手機上可收合工具列（存/匯出按鈕＋格式列），編輯功能仍在，只是先藏起來省空間
   const [a4Mode, setA4Mode] = useState(() => localStorage.getItem('noteA4Mode') !== '0'); // A4 所見即所得紙張模式（寬度與分頁參考線與輸出 PDF 1:1 同步）
-  const [a4PageCount, setA4PageCount] = useState(1);
+  const [a4Guides, setA4Guides] = useState({ count: 1, lines: [] });
   const a4SheetRef = useRef(null);
   useEffect(() => { localStorage.setItem('noteToolbarOpen', toolbarOpen ? '1' : '0'); }, [toolbarOpen]);
   useEffect(() => { localStorage.setItem('noteA4Mode', a4Mode ? '1' : '0'); }, [a4Mode]);
@@ -2715,20 +2721,70 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!a4Mode || !isDesktop || !activeNote?.id) { setA4PageCount(1); return; }
-    const el = a4SheetRef.current;
-    if (!el) return;
+    if (!a4Mode || !isDesktop || !activeNote?.id) { setA4Guides({ count: 1, lines: [] }); return; }
+    const sheet = a4SheetRef.current;
+    const body = bodyRef.current;
+    if (!sheet) return;
     const MM_TO_PX = 96 / 25.4;
-    const MARGIN_PX = 18 * MM_TO_PX * 2;
+    const MARGIN_PX = 18 * MM_TO_PX;
     const PAGE_H_PX = 261 * MM_TO_PX;
     const update = () => {
-      const contentH = Math.max(0, el.scrollHeight - MARGIN_PX);
-      setA4PageCount(Math.max(1, Math.ceil(contentH / PAGE_H_PX)));
+      const sheetRect = sheet.getBoundingClientRect();
+      const titleEl = sheet.querySelector('.a4-print-title');
+      const contentTop = titleEl ? (titleEl.getBoundingClientRect().top - sheetRect.top) : MARGIN_PX;
+      const stopEl = body?.querySelector('.print-stop');
+      const stopVisible = stopEl && stopEl.getBoundingClientRect().height > 0;
+      const stopTop = stopVisible ? (stopEl.getBoundingClientRect().top - sheetRect.top) : Infinity;
+      const trailingBreaks = stopVisible ? new Set(collectTrailingPageBreaks(stopEl, body)) : new Set();
+
+      // 收集所有可見且在「以下不印」之前的手動分頁符號
+      const manualBreaks = body
+        ? Array.from(body.querySelectorAll('.page-break'))
+            .filter(el => !trailingBreaks.has(el))
+            .map(el => {
+              const r = el.getBoundingClientRect();
+              return { top: r.top - sheetRect.top, bottom: r.bottom - sheetRect.top, h: r.height };
+            })
+            .filter(b => b.h > 0 && b.top < stopTop - 2)
+            .sort((a, b) => a.top - b.top)
+        : [];
+
+      const contentEnd = stopVisible ? stopTop : Math.max(contentTop, sheet.scrollHeight - MARGIN_PX);
+      const lines = [];
+      let pageStart = contentTop;
+      let pageNum = 1;
+
+      for (const brk of manualBreaks) {
+        // 如果這個手動分頁之前內容本身已經超過一頁，先補上自動換頁線
+        while (brk.top - pageStart > PAGE_H_PX + 2) {
+          const y = pageStart + PAGE_H_PX;
+          lines.push({ kind: 'auto', y, from: pageNum, to: pageNum + 1 });
+          pageStart = y;
+          pageNum++;
+        }
+        // 手動分頁本身結束當前頁，下一頁從分頁區塊下方重新起算 261mm
+        lines.push({ kind: 'manual', y: (brk.top + brk.bottom) / 2, from: pageNum, to: pageNum + 1 });
+        pageStart = brk.bottom;
+        pageNum++;
+      }
+
+      // 最後一個手動分頁（或整篇無手動分頁）之後，依 261mm 計算自動換頁線
+      while (contentEnd - pageStart > PAGE_H_PX + 2) {
+        const y = pageStart + PAGE_H_PX;
+        lines.push({ kind: 'auto', y, from: pageNum, to: pageNum + 1 });
+        pageStart = y;
+        pageNum++;
+      }
+
+      setA4Guides({ count: pageNum, lines });
     };
+    const rafUpdate = () => requestAnimationFrame(update);
     update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
+    const ro = new ResizeObserver(rafUpdate);
+    ro.observe(sheet);
+    const mo = body ? new MutationObserver(rafUpdate) : null;
+    mo?.observe(body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-li-hidden', 'class', 'style'] });
+    return () => { ro.disconnect(); mo?.disconnect(); };
   }, [a4Mode, isDesktop, activeNote?.id, activeNote?.body, activeNote?.title, noteImages.length]);
 
   useEffect(() => { setGlobalSearchIdx(0); }, [globalSearchQuery, globalSearchFilter, globalSearchOpen]);
@@ -6385,7 +6441,7 @@ function App() {
                   }
                 },
                   h(Icon, { name: 'printer', size: 14 }),
-                  a4Mode ? `A4 預覽 (${a4PageCount}頁)` : 'A4 預覽'
+                  a4Mode ? `A4 預覽 (${a4Guides.count}頁)` : 'A4 預覽'
                 ),
 
                 // 更多操作下拉選單（手動存檔、容量、刪除）
@@ -6594,12 +6650,18 @@ function App() {
             ),
             ),
             h('div', { ref: a4SheetRef, className: 'a4-sheet' + (a4Mode && isDesktop ? ' is-a4' : '') },
-              a4Mode && isDesktop && a4PageCount > 1 && Array.from({ length: a4PageCount - 1 }, (_, i) =>
-                h('div', {
-                  key: `pg-${i + 1}`,
-                  className: 'a4-page-guide no-print',
-                  style: { top: `calc(18mm + ${(i + 1) * 261}mm)` }
-                }, h('span', null, `第 ${i + 1} 頁結束 · 第 ${i + 2} 頁開始`))
+              a4Mode && isDesktop && a4Guides.lines.map((g, i) =>
+                g.kind === 'manual'
+                  ? h('div', {
+                      key: `mg-${i}`,
+                      className: 'a4-manual-badge no-print',
+                      style: { top: `${g.y}px` }
+                    }, `第 ${g.from} 頁 → 第 ${g.to} 頁`)
+                  : h('div', {
+                      key: `pg-${i}`,
+                      className: 'a4-page-guide no-print',
+                      style: { top: `${g.y}px` }
+                    }, h('span', null, `第 ${g.from} 頁結束 · 第 ${g.to} 頁開始`))
               ),
               h('h1', { className: 'a4-print-title' }, activeNote.title || '未命名筆記'),
               h('div', {
