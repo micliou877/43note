@@ -306,6 +306,14 @@
       flex-wrap: wrap !important; justify-content: center !important; white-space: normal !important;
       padding: 6px 8px !important; gap: 4px !important;
     }
+    .dropdown-menu, .dropdown-menu.align-right {
+      position: fixed !important; left: 12px !important; right: 12px !important;
+      top: auto !important; bottom: 16px !important;
+      min-width: 0 !important; max-height: 70dvh; overflow-y: auto;
+      padding: 10px !important; border-radius: 14px !important;
+      z-index: 500 !important; box-shadow: var(--shadow-lg) !important;
+    }
+    .dropdown-menu .dropdown-item { padding: 11px 12px; font-size: 14px; }
     .toast-stack { top: auto; bottom: 16px; left: 16px; right: 16px; max-width: none; }
   }
   .note-body { font-family: inherit; }
@@ -412,18 +420,21 @@
 
   @media print {
     .note-body, .note-body * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
-    aside, section, .resize-handle, .no-print, .toast-stack { display: none !important; }
+    aside, section, .resize-handle, .no-print, .toast-stack, .dropdown-menu, .a4-page-guide, .a4-manual-badge { display: none !important; }
     .a4-print-title { display: block !important; font-size: 22px !important; font-weight: 700 !important; line-height: 1.35 !important; color: #0f172a !important; margin: 0 0 12px !important; padding: 0 !important; }
     html, body { height: auto !important; background: white !important; color: #1f2937 !important; margin: 0 !important; padding: 0 !important; }
     #root > div { height: auto !important; overflow: visible !important; display: block !important; background: white !important; }
-    main { overflow: visible !important; height: auto !important; flex: none !important; display: block !important; background: white !important; }
-    main > div { overflow: visible !important; height: auto !important; flex: none !important; background: white !important; padding: 0 !important; margin: 0 !important; }
+    main, main.mobile-full-width { overflow: visible !important; height: auto !important; flex: none !important; display: block !important; width: 100% !important; max-width: none !important; background: white !important; }
+    main > div { overflow: visible !important; height: auto !important; flex: none !important; display: block !important; background: white !important; padding: 0 !important; margin: 0 !important; }
     .a4-sheet, .a4-sheet.is-a4 {
+      display: block !important; flex: none !important;
       width: 100% !important; max-width: none !important; min-height: 0 !important;
       margin: 0 !important; padding: 0 !important; border: none !important;
       border-radius: 0 !important; box-shadow: none !important; background: white !important;
     }
     .note-body {
+      display: block !important; flex: none !important;
+      position: relative !important; isolation: isolate !important;
       overflow: visible !important; min-height: 0 !important; max-height: none !important;
       border: none !important; border-radius: 0 !important; padding: 0 !important; margin: 0 !important;
       background: white !important; color: #1f2937 !important; box-shadow: none !important;
@@ -486,7 +497,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/11/26 21:56";
+const BUILD_TIME = "2026/11/27 07:52";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -3359,6 +3370,7 @@ function App() {
     });
   };
   const exportToPDF = () => {
+    document.activeElement?.blur?.();
     const prev = document.title;
     document.title = activeNote?.title || '未命名筆記';
     const body = bodyRef.current;
@@ -3376,12 +3388,26 @@ function App() {
     const prevDisplay = hiddenNodes.map(n => n.style.display);
     hiddenNodes.forEach(n => { n.style.display = 'none'; });
 
-    window.addEventListener('afterprint', () => {
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
       document.title = prev;
       freeImgs.forEach(img => img.classList.add('img-free'));
       hiddenNodes.forEach((n, i) => { n.style.display = prevDisplay[i]; });
-    }, { once: true });
+    };
+    let printed = false;
+    const onBefore = () => { printed = true; };
+    window.addEventListener('beforeprint', onBefore, { once: true });
+    window.addEventListener('afterprint', cleanup, { once: true });
     window.print();
+    setTimeout(() => {
+      window.removeEventListener('beforeprint', onBefore);
+      if (!printed && document.visibilityState === 'visible' && window.innerWidth <= 768) {
+        cleanup();
+        notify('若手機主畫面捷徑無法直接列印，請改用 Safari / Chrome 開啟，或點瀏覽器「分享 → 列印」存成 PDF', 'warning', 6500);
+      }
+    }, 1200);
   };
 
   const exportToWord = async () => {
@@ -6549,7 +6575,7 @@ function App() {
                     style: { ...S.ghostBtn, padding: '6px 10px' }
                   }, h(Icon, { name: 'download', size: 14 }), '匯出', h(Icon, { name: 'chevronDown', size: 12 })),
                   editorMenu === 'export' && h('div', { className: 'dropdown-menu' },
-                    h('button', { className: 'dropdown-item', onClick: () => { setEditorMenu(null); exportToPDF(); } },
+                    h('button', { className: 'dropdown-item', onClick: () => { flushSync(() => setEditorMenu(null)); exportToPDF(); } },
                       h(Icon, { name: 'printer', size: 14 }), '列印 / 匯出 PDF'),
                     h('button', { className: 'dropdown-item', onClick: () => { setEditorMenu(null); exportToWord(); } },
                       h(Icon, { name: 'note', size: 14 }), '匯出 Word (.docx)'),
