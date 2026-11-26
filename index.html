@@ -317,12 +317,32 @@
   .note-body img[data-inline]:hover { outline: 2px solid var(--accent); }
   .note-body img[data-inline].img-sel { outline: 2px solid var(--accent); }
   .note-body img[data-inline].img-border { border: 2px solid var(--text-muted); }
-  .note-body { overflow: hidden; position: relative; }
+  .note-body { overflow: hidden; position: relative; isolation: isolate; }
   .note-body::after { content: ""; display: table; clear: both; }
   .note-body-readmode { cursor: default; }
   .note-body-readmode img[data-inline] { cursor: default; }
   .note-body img[data-inline].img-row { float: left !important; margin: 3px 1% 8px 0 !important; }
   .note-body img[data-inline].img-free { position: absolute; float: none !important; margin: 0 !important; cursor: move; z-index: 5; }
+  .note-body img[data-inline].img-free.img-behind { z-index: -1; }
+  .note-body img[data-inline].img-free.img-behind.img-sel { outline: 2px dashed var(--accent); outline-offset: 1px; }
+  .img-layer-menu {
+    position: absolute; left: 0; min-width: 186px; padding: 6px;
+    background: #0f172a; color: #e2e8f0; border: 1px solid #334155;
+    border-radius: 10px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+    z-index: 410; animation: popIn 0.14s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .img-layer-menu.open-down { top: calc(100% + 6px); }
+  .img-layer-menu.open-up { bottom: calc(100% + 6px); }
+  .img-layer-section { padding: 4px 8px 3px; font-size: 10.5px; font-weight: 600; color: #94a3b8; letter-spacing: 0.04em; }
+  .img-layer-sep { height: 1px; background: #1e293b; margin: 4px 0; }
+  .img-layer-item {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 6px 8px; border: none; background: transparent; color: #e2e8f0;
+    border-radius: 7px; cursor: pointer; font-size: 12px; text-align: left; white-space: nowrap;
+  }
+  .img-layer-item:hover:not([disabled]) { background: #1e293b; color: #fff; }
+  .img-layer-item.is-active { background: rgba(20, 184, 166, 0.2); color: #5eead4; font-weight: 600; }
+  .img-layer-item[disabled] { opacity: 0.35; cursor: default; }
   .note-body .li1 { margin: 3px 0; }
   .note-body .li2 { padding-left: 2em; margin: 3px 0; }
   .note-body .li3 { padding-left: 4em; margin: 3px 0; }
@@ -466,7 +486,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/11/26 21:28";
+const BUILD_TIME = "2026/11/26 21:56";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -744,6 +764,13 @@ const ICON_PATHS = {
   outdent: '<polyline points="7 8 3 12 7 16"/><line x1="21" x2="11" y1="12" y2="12"/><line x1="21" x2="11" y1="6" y2="6"/><line x1="21" x2="11" y1="18" y2="18"/>',
   chevronsUpDown: '<path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/>',
   info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+  layers: '<path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/>',
+  arrowUp: '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
+  arrowDown: '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
+  chevronsUp: '<path d="m17 11-5-5-5 5"/><path d="m17 18-5-5-5 5"/>',
+  chevronsDown: '<path d="m7 6 5 5 5-5"/><path d="m7 13 5 5 5-5"/>',
+  type: '<polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/>',
+  image: '<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/>',
 };
 
 function Icon({ name, size = 15, strokeWidth = 1.85, color, style }) {
@@ -2660,6 +2687,8 @@ function App() {
   const [toolbarOpen, setToolbarOpen] = useState(() => localStorage.getItem('noteToolbarOpen') !== '0'); // 手機上可收合工具列（存/匯出按鈕＋格式列），編輯功能仍在，只是先藏起來省空間
   const [a4Mode, setA4Mode] = useState(() => localStorage.getItem('noteA4Mode') !== '0'); // A4 所見即所得紙張模式（寬度與分頁參考線與輸出 PDF 1:1 同步）
   const [a4Guides, setA4Guides] = useState({ count: 1, lines: [] });
+  const [imgLayerMenu, setImgLayerMenu] = useState(false); // 圖片浮動工具列的「圖層」下拉選單
+  useEffect(() => { setImgLayerMenu(false); }, [selImg?.imgId]);
   const a4SheetRef = useRef(null);
   useEffect(() => { localStorage.setItem('noteToolbarOpen', toolbarOpen ? '1' : '0'); }, [toolbarOpen]);
   useEffect(() => { localStorage.setItem('noteA4Mode', a4Mode ? '1' : '0'); }, [a4Mode]);
@@ -4320,12 +4349,112 @@ function App() {
       setUploading(false);
     }
   };
+  // ── 圖層順序（自由擺放圖片 .img-free 才有前後關係） ──
+  // 分成兩組：一般（在文字上方，z-index 10 起跳）與「文字在圖片上方」（.img-behind，負的 z-index，
+  // 搭配 .note-body 的 isolation: isolate，圖片會被畫在文字底下但仍在筆記底色之上）。
+  // 順序直接存在 inline style 的 z-index，所以存檔、列印/匯出 PDF 都會跟畫面一致。
+  const FREE_IMG_SEL = 'img[data-inline].img-free';
+  const layerGroup = (behind) => Array.from(bodyRef.current?.querySelectorAll(FREE_IMG_SEL) || [])
+    .filter(el => el.classList.contains('img-behind') === behind)
+    .map((el, i) => { const z = parseInt(el.style.zIndex, 10); return { el, i, z: isNaN(z) ? (behind ? -1 : 5) : z }; })
+    .sort((a, b) => (a.z - b.z) || (a.i - b.i))
+    .map(x => x.el);
+  const applyLayerOrder = (arr, behind) => arr.forEach((el, i) => { el.style.zIndex = String(behind ? i - arr.length : 10 + i); });
+  const changeImgLayer = (imgId, action) => {
+    const body = bodyRef.current;
+    const img = body?.querySelector(`img[data-inline="${imgId}"]`);
+    if (!img || !img.classList.contains('img-free')) return;
+    const behind = img.classList.contains('img-behind');
+    if (action === 'toggleBehind') {
+      const from = layerGroup(behind).filter(el => el !== img);
+      img.classList.toggle('img-behind', !behind);
+      const to = layerGroup(!behind).filter(el => el !== img);
+      to.push(img);
+      applyLayerOrder(from, behind);
+      applyLayerOrder(to, !behind);
+    } else {
+      const arr = layerGroup(behind);
+      const idx = arr.indexOf(img);
+      arr.splice(idx, 1);
+      const ni = action === 'front' ? arr.length : action === 'back' ? 0 : action === 'up' ? Math.min(arr.length, idx + 1) : Math.max(0, idx - 1);
+      arr.splice(ni, 0, img);
+      applyLayerOrder(arr, behind);
+    }
+    updateNoteFields({ body: body.innerHTML });
+    setSelImg(s => (s && s.imgId === imgId) ? { ...s, rect: img.getBoundingClientRect() } : s);
+  };
+  // 滑鼠位置是否剛好落在文字上（用來判斷：點在文字上 = 編輯文字；點在空白處 = 選取底下的圖片）
+  const pointHitsText = (x, y) => {
+    let range = null;
+    if (document.caretRangeFromPoint) range = document.caretRangeFromPoint(x, y);
+    else if (document.caretPositionFromPoint) {
+      const p = document.caretPositionFromPoint(x, y);
+      if (p) { range = document.createRange(); range.setStart(p.offsetNode, p.offset); }
+    }
+    const node = range?.startContainer;
+    if (!node || node.nodeType !== 3 || !bodyRef.current?.contains(node)) return false;
+    const len = node.textContent.length, off = range.startOffset;
+    for (const o of [off - 1, off]) {
+      if (o < 0 || o >= len) continue;
+      const r = document.createRange();
+      r.setStart(node, o); r.setEnd(node, o + 1);
+      for (const rc of r.getClientRects()) {
+        if (x >= rc.left - 2 && x <= rc.right + 2 && y >= rc.top - 2 && y <= rc.bottom + 2) return true;
+      }
+    }
+    return false;
+  };
+  // 「文字在圖片上方」的圖片被文字區塊蓋住，點擊時 e.target 不會是圖片，改用座標找出底下的圖片
+  const behindImgAt = (x, y) => (document.elementsFromPoint?.(x, y) || [])
+    .find(el => el.tagName === 'IMG' && el.classList.contains('img-behind') && bodyRef.current?.contains(el)) || null;
+  // 點兩下空白處就在那一行開始輸入：在內容最後面自動補上空行，直到滑鼠點的那一行，游標放過去
+  const clickToTypeAt = (e) => {
+    const body = bodyRef.current;
+    if (!body || readMode || e.target !== body) return false;
+    const bodyRect = body.getBoundingClientRect();
+    const cs = getComputedStyle(body);
+    let bottom = bodyRect.top + (parseFloat(cs.paddingTop) || 0);
+    Array.from(body.childNodes).forEach(n => {
+      if (n.nodeType === 1) {
+        if (n.classList?.contains('img-free')) return;
+        const r = n.getBoundingClientRect();
+        if (r.height > 0) bottom = Math.max(bottom, r.bottom + (parseFloat(getComputedStyle(n).marginBottom) || 0));
+      } else if (n.nodeType === 3 && n.textContent) {
+        const rg = document.createRange(); rg.selectNodeContents(n);
+        const r = rg.getBoundingClientRect();
+        if (r.height > 0) bottom = Math.max(bottom, r.bottom);
+      }
+    });
+    if (e.clientY <= bottom + 2) return false;
+    const lh = parseFloat(cs.lineHeight) || 26;
+    const count = Math.min(200, Math.max(1, Math.ceil((e.clientY - bottom) / lh)));
+    bodyUndoStack.current = [...bodyUndoStack.current, body.innerHTML].slice(-50);
+    bodyUndoLastPush.current = Date.now();
+    setCanBodyUndo(true);
+    const hasFloat = !!body.querySelector('img[data-inline].img-row');
+    let last = null;
+    for (let i = 0; i < count; i++) {
+      const d = document.createElement('div');
+      if (i === 0 && hasFloat) d.style.clear = 'both';
+      d.appendChild(document.createElement('br'));
+      body.appendChild(d);
+      last = d;
+    }
+    body.focus();
+    const sel = window.getSelection();
+    const r = document.createRange();
+    r.setStart(last, 0); r.collapse(true);
+    sel.removeAllRanges(); sel.addRange(r);
+    updateNoteFields({ body: body.innerHTML });
+    return true;
+  };
   // 自由擺放模式的圖片（.img-free）用滑鼠拖曳直接改 left/top，不影響文字排列。
   // left/top/width 一律存成「相對於 note-body 容器」的百分比而非固定 px──
   // 因為列印時側欄會被隱藏、note-body 的實際寬度跟編輯時不同，文字也會重新換行，
   // 用 px 記錄的位置在列印版面裡會整個跑掉；用百分比才能讓圖片跟著容器縮放，位置維持相對一致。
   const startFreeImgDrag = (e) => {
-    const img = e.target.tagName === 'IMG' && e.target.dataset.inline ? e.target : null;
+    let img = e.target.tagName === 'IMG' && e.target.dataset.inline ? e.target : null;
+    if (!img && e.button === 0 && !pointHitsText(e.clientX, e.clientY)) img = behindImgAt(e.clientX, e.clientY);
     if (!img || !img.classList.contains('img-free')) return;
     e.preventDefault();
     selectInlineImg(img);
@@ -6685,7 +6814,8 @@ function App() {
                     navigateToTaggedNote(tagEl.dataset.noteId, tagEl.dataset.projectId);
                     return;
                   }
-                  const img = e.target.tagName === 'IMG' && e.target.dataset.inline ? e.target : null;
+                  let img = e.target.tagName === 'IMG' && e.target.dataset.inline ? e.target : null;
+                  if (!img && !pointHitsText(e.clientX, e.clientY)) img = behindImgAt(e.clientX, e.clientY);
                   if (img) selectInlineImg(img);
                   else clearSelImg();
                   const brk = e.target.closest?.('.page-break, .print-stop');
@@ -6695,8 +6825,13 @@ function App() {
                 },
                 onDoubleClick: (e) => {
                   // 雙擊圖片直接開標註，跟單擊選取後再按「✏️ 標注」按鈕是同一套邏輯
-                  const img = e.target.tagName === 'IMG' && e.target.dataset.inline ? e.target : null;
-                  if (!img) return;
+                  let img = e.target.tagName === 'IMG' && e.target.dataset.inline ? e.target : null;
+                  if (!img && !pointHitsText(e.clientX, e.clientY)) img = behindImgAt(e.clientX, e.clientY);
+                  if (!img) {
+                    // 雙擊內容下方的空白處：自動換行到那一行，直接在那裡輸入
+                    if (clickToTypeAt(e)) e.preventDefault();
+                    return;
+                  }
                   e.preventDefault();
                   let strokes = [];
                   try { strokes = JSON.parse(img.dataset.strokes || '[]'); } catch {}
@@ -7008,7 +7143,8 @@ function App() {
         if (!img || !body) return;
         if (img.classList.contains('img-free')) {
           img.classList.remove('img-free');
-          img.style.position = ''; img.style.left = ''; img.style.top = '';
+          img.classList.remove('img-behind');
+          img.style.position = ''; img.style.left = ''; img.style.top = ''; img.style.zIndex = '';
           img.draggable = true;
         } else {
           img.classList.remove('img-row');
@@ -7020,6 +7156,9 @@ function App() {
           img.style.top = ((iRect.top - bRect.top + body.scrollTop) / bh * 100) + '%';
           img.classList.add('img-free');
           img.draggable = false;
+          const topGroup = layerGroup(false).filter(el => el !== img);
+          topGroup.push(img);
+          applyLayerOrder(topGroup, false);
         }
         updateNoteFields({ body: body.innerHTML });
         setSelImg(s => s ? { ...s, rect: img.getBoundingClientRect() } : s);
@@ -7034,6 +7173,40 @@ function App() {
         setSelImg(s => s ? { ...s, rect: img.getBoundingClientRect() } : s);
       };
       const sep = h('div', { style: { width: 1, height: 16, background: '#334155', margin: '0 2px', flexShrink: 0 } });
+      const selImgEl = bodyRef.current?.querySelector(`img[data-inline="${selImg.imgId}"]`);
+      const isBehind = !!selImgEl?.classList.contains('img-behind');
+      const layerArr = isFree ? layerGroup(isBehind) : [];
+      const layerIdx = selImgEl ? layerArr.indexOf(selImgEl) : -1;
+      const atTop = layerIdx >= layerArr.length - 1;
+      const atBottom = layerIdx <= 0;
+      const openUp = !isDesktop || clampedTop > window.innerHeight * 0.55;
+      const layerItem = (icon, label, onClick, opts = {}) => h('button', {
+        key: label, className: 'img-layer-item' + (opts.active ? ' is-active' : ''), disabled: !!opts.disabled,
+        onClick: (e) => { e.stopPropagation(); if (!opts.disabled) onClick(e); }
+      }, h(Icon, { name: icon, size: 13 }), label);
+      const layerMenu = h('div', { style: { position: 'relative', display: 'inline-flex' } },
+        h('button', {
+          style: { ...btnStyle, color: imgLayerMenu ? '#5eead4' : '#e2e8f0', background: imgLayerMenu ? 'rgba(20,184,166,.18)' : 'none' },
+          onClick: (e) => { e.stopPropagation(); setImgLayerMenu(m => !m); },
+          title: '圖層順序 / 文字繞排'
+        }, h(Icon, { name: 'layers', size: 13 }), '圖層', h(Icon, { name: 'chevronDown', size: 10 })),
+        imgLayerMenu && h('div', { className: 'img-layer-menu ' + (openUp ? 'open-up' : 'open-down') },
+          !isFree
+            ? h(React.Fragment, null,
+                h('div', { className: 'img-layer-section', style: { whiteSpace: 'normal', lineHeight: 1.5 } }, '圖層順序只適用於「自由擺放」的圖片'),
+                layerItem('maximize', '切換為自由擺放', (e) => toggleFree(e)))
+            : h(React.Fragment, null,
+                h('div', { className: 'img-layer-section tabular' }, `排列順序（第 ${layerArr.length - layerIdx} 層 / 共 ${layerArr.length} 層）`),
+                layerItem('chevronsUp', '移至最前', () => changeImgLayer(selImg.imgId, 'front'), { disabled: atTop }),
+                layerItem('arrowUp', '上移一層', () => changeImgLayer(selImg.imgId, 'up'), { disabled: atTop }),
+                layerItem('arrowDown', '下移一層', () => changeImgLayer(selImg.imgId, 'down'), { disabled: atBottom }),
+                layerItem('chevronsDown', '移至最後', () => changeImgLayer(selImg.imgId, 'back'), { disabled: atBottom }),
+                h('div', { className: 'img-layer-sep' }),
+                h('div', { className: 'img-layer-section' }, '圖片與文字'),
+                layerItem('image', '圖片在文字上方', () => { if (isBehind) changeImgLayer(selImg.imgId, 'toggleBehind'); }, { active: !isBehind }),
+                layerItem('type', '文字在圖片上方', () => { if (!isBehind) changeImgLayer(selImg.imgId, 'toggleBehind'); }, { active: isBehind }))
+        )
+      );
       return h(React.Fragment, null,
         h('div', { className: 'no-print img-float-bar', onPointerDown: e => { if (e.pointerType === 'mouse') e.preventDefault(); },
           style: { position: 'fixed', top: clampedTop, left: clampedLeft, zIndex: 400,
@@ -7055,6 +7228,7 @@ function App() {
             style: { ...btnStyle, color: isBorder ? '#fbbf24' : '#94a3b8', background: isBorder ? 'rgba(251,191,36,.18)' : 'none' },
             onClick: toggleBorder, title: isBorder ? '移除框線' : '加上框線'
           }, '框線'),
+          layerMenu,
           sep,
           h('button', { style: btnStyle, title: '裁切', onClick: () => {
             const img = bodyRef.current?.querySelector(`img[data-inline="${selImg.imgId}"]`);
