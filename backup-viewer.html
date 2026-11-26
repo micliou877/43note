@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>備份檔案檢視器</title>
+<style>
+  :root{
+    --bg:#f8fafc; --card:#ffffff; --border:#e5e7eb; --text:#0f172a; --muted:#64748b;
+    --accent:#0d9488; --accent-bg:#f0fdfa; --accent-border:#99f6e4;
+    --done-bg:#f1f5f9; --danger:#dc2626;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;background:var(--bg);color:var(--text);}
+  header{position:sticky;top:0;z-index:10;background:#fff;border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+  header h1{font-size:16px;margin:0;white-space:nowrap;}
+  #fileInput{display:none;}
+  .btn{display:inline-flex;align-items:center;gap:6px;background:var(--accent-bg);color:var(--accent);border:1px solid var(--accent-border);border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer;font-weight:600;}
+  .btn:hover{filter:brightness(0.97);}
+  .meta{font-size:12.5px;color:var(--muted);}
+  #searchBox{flex:1;min-width:160px;max-width:320px;}
+  #searchBox input{width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;}
+  main{max-width:900px;margin:0 auto;padding:20px;}
+  #empty{text-align:center;color:var(--muted);padding:60px 20px;font-size:14px;line-height:1.8;}
+  #empty code{background:#eee;padding:2px 6px;border-radius:4px;}
+  .project{background:var(--card);border:1px solid var(--border);border-radius:12px;margin-bottom:18px;overflow:hidden;}
+  .project-head{padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;user-select:none;background:#fafafa;border-bottom:1px solid var(--border);}
+  .project-head h2{font-size:15px;margin:0;flex:1;}
+  .project-head .count{font-size:12px;color:var(--muted);}
+  .project-head .chev{transition:transform .15s;color:var(--muted);font-size:12px;}
+  .project.collapsed .chev{transform:rotate(-90deg);}
+  .project.collapsed .project-body{display:none;}
+  .project-body{padding:10px 18px 16px;}
+  .section-label{font-size:12px;font-weight:700;color:var(--muted);margin:14px 0 8px;text-transform:uppercase;letter-spacing:.04em;}
+  .task{display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:1px dashed #eee;font-size:13.5px;}
+  .task:last-child{border-bottom:none;}
+  .task .box{width:15px;height:15px;border:1.5px solid #cbd5e1;border-radius:4px;flex:none;margin-top:2px;}
+  .task.done .box{background:var(--accent);border-color:var(--accent);position:relative;}
+  .task.done .title{text-decoration:line-through;color:var(--muted);}
+  .task .title{flex:1;}
+  .task .due{font-size:11.5px;color:var(--muted);white-space:nowrap;}
+  .note{border:1px solid var(--border);border-radius:10px;margin-bottom:12px;overflow:hidden;}
+  .note-head{padding:10px 14px;background:#fcfcfc;border-bottom:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px;}
+  .note-head h3{font-size:14px;margin:0;}
+  .note-head .date{font-size:11.5px;color:var(--muted);white-space:nowrap;}
+  .note-body{padding:14px;font-size:13.5px;line-height:1.75;word-wrap:break-word;display:none;}
+  .note.open .note-body{display:block;}
+  .note-body img{max-width:100%;border-radius:6px;margin:4px 0;}
+  .note-body p{margin:0 0 8px;}
+  .imgs{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
+  .imgs img{max-width:160px;max-height:160px;border-radius:6px;border:1px solid var(--border);object-fit:cover;}
+  .empty-note{color:var(--muted);font-style:italic;}
+  #dropzone{border:2px dashed var(--accent-border);border-radius:14px;padding:60px 20px;text-align:center;margin:30px auto;max-width:520px;color:var(--muted);}
+  #dropzone.drag{background:var(--accent-bg);}
+  @media print{
+    header,#dropzone{display:none;}
+    .note-body,.project-body{display:block !important;}
+    .project{break-inside:avoid;}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📦 備份檔案檢視器</h1>
+  <label class="btn" for="fileInput">📂 選擇備份 JSON 檔案</label>
+  <input type="file" id="fileInput" accept="application/json,.json">
+  <div id="searchBox" style="display:none;"><input type="text" id="searchInput" placeholder="搜尋筆記 / 任務標題…"></div>
+  <span class="meta" id="summary"></span>
+</header>
+
+<main>
+  <div id="dropzone">
+    請選擇（或拖曳）匯出的備份 JSON 檔案<br>
+    <span style="font-size:12px;">檔名通常是「照片筆記備份_2026-01-01.json」，所有內容只會在你的瀏覽器裡處理，不會上傳到任何地方。</span>
+  </div>
+  <div id="content"></div>
+</main>
+
+<script>
+let DATA = null;
+
+const $ = sel => document.querySelector(sel);
+const fileInput = $('#fileInput');
+const dropzone = $('#dropzone');
+const content = $('#content');
+const summary = $('#summary');
+const searchBox = $('#searchBox');
+const searchInput = $('#searchInput');
+
+fileInput.addEventListener('change', e => {
+  const f = e.target.files?.[0];
+  if (f) loadFile(f);
+});
+
+['dragover','dragenter'].forEach(ev => dropzone.addEventListener(ev, e => {
+  e.preventDefault(); dropzone.classList.add('drag');
+}));
+['dragleave','drop'].forEach(ev => dropzone.addEventListener(ev, e => {
+  e.preventDefault(); dropzone.classList.remove('drag');
+}));
+dropzone.addEventListener('drop', e => {
+  const f = e.dataTransfer.files?.[0];
+  if (f) loadFile(f);
+});
+document.body.addEventListener('dragover', e => e.preventDefault());
+document.body.addEventListener('drop', e => { if (e.target !== dropzone) e.preventDefault(); });
+
+function loadFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    let data;
+    try { data = JSON.parse(reader.result); }
+    catch { alert('這不是有效的 JSON 檔案。'); return; }
+    if (!Array.isArray(data.projects) && !Array.isArray(data.notes) && !Array.isArray(data.tasks)) {
+      alert('這不像是本工具支援的備份格式（找不到 projects / notes / tasks）。'); return;
+    }
+    DATA = data;
+    render();
+  };
+  reader.onerror = () => alert('讀取檔案失敗。');
+  reader.readAsText(file);
+}
+
+function fmtDate(v) {
+  if (!v) return '';
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleString('zh-TW', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+
+function fmtDay(v) {
+  if (!v) return '';
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('zh-TW', { year:'numeric', month:'2-digit', day:'2-digit' });
+}
+
+function esc(s) {
+  return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function render() {
+  dropzone.style.display = 'none';
+  searchBox.style.display = 'block';
+
+  const projects = (DATA.projects || []).filter(p => !p.deleted)
+    .sort((a,b) => (b.pinned?1:0) - (a.pinned?1:0) || (a.sortOrder||0) - (b.sortOrder||0));
+  const notes = (DATA.notes || []).filter(n => !n.deleted);
+  const tasks = (DATA.tasks || []).filter(t => !t.deleted);
+
+  summary.textContent = `備份時間：${fmtDate(DATA.exportedAt) || '未知'} ・ 專案 ${projects.length} 個・筆記 ${notes.length} 筆・任務 ${tasks.length} 個`;
+
+  const noProjNotes = notes.filter(n => !n.projectId || !projects.find(p => p.id === n.projectId));
+  const noProjTasks = tasks.filter(t => !t.projectId || !projects.find(p => p.id === t.projectId));
+  const projList = [...projects];
+  if (noProjNotes.length || noProjTasks.length) {
+    projList.push({ id: '__none__', name: '（未分類）' });
+  }
+
+  content.innerHTML = projList.map(p => renderProject(p, notes, tasks)).join('') || '<div class="empty-note">這份備份沒有任何專案。</div>';
+
+  content.querySelectorAll('.project-head').forEach(el => {
+    el.addEventListener('click', () => el.closest('.project').classList.toggle('collapsed'));
+  });
+  content.querySelectorAll('.note-head').forEach(el => {
+    el.addEventListener('click', () => el.closest('.note').classList.toggle('open'));
+  });
+}
+
+function renderProject(p, allNotes, allTasks) {
+  const pNotes = allNotes.filter(n => (p.id === '__none__') ? (!n.projectId || !allProjIds().has(n.projectId)) : n.projectId === p.id)
+    .sort((a,b) => new Date(b.updated || b.created || 0) - new Date(a.updated || a.created || 0));
+  const pTasks = allTasks.filter(t => (p.id === '__none__') ? (!t.projectId || !allProjIds().has(t.projectId)) : t.projectId === p.id)
+    .sort((a,b) => (a.done - b.done) || ((a.sortOrder||0) - (b.sortOrder||0)));
+
+  const taskHtml = pTasks.length ? `
+    <div class="section-label">任務 (${pTasks.length})</div>
+    ${pTasks.map(t => `
+      <div class="task ${t.done ? 'done' : ''}" data-search="${esc((t.title||'').toLowerCase())}">
+        <div class="box"></div>
+        <div class="title">${esc(t.title || '（無標題）')}</div>
+        <div class="due">${t.dueDate ? '📅 ' + fmtDay(t.dueDate) : ''}</div>
+      </div>
+    `).join('')}
+  ` : '';
+
+  const noteHtml = pNotes.length ? `
+    <div class="section-label">筆記 (${pNotes.length})</div>
+    ${pNotes.map(n => renderNote(n)).join('')}
+  ` : '';
+
+  if (!taskHtml && !noteHtml) return '';
+
+  return `
+    <div class="project" data-search="${esc(p.name.toLowerCase())}">
+      <div class="project-head">
+        <h2>${esc(p.name)}</h2>
+        <span class="count">${pNotes.length} 筆記・${pTasks.length} 任務</span>
+        <span class="chev">▾</span>
+      </div>
+      <div class="project-body">
+        ${taskHtml}
+        ${noteHtml}
+      </div>
+    </div>
+  `;
+}
+
+let _projIdCache = null;
+function allProjIds() {
+  if (!_projIdCache) _projIdCache = new Set((DATA.projects||[]).map(p => p.id));
+  return _projIdCache;
+}
+
+function renderNote(n) {
+  const imgs = (n._images || []).filter(im => im.url || im.dataUrl);
+  const bodyHasContent = n.body && n.body.trim();
+  return `
+    <div class="note" data-search="${esc(((n.title||'') + ' ' + (n.body||'')).toLowerCase())}">
+      <div class="note-head">
+        <h3>${esc(n.title || '（無標題）')}</h3>
+        <span class="date">${fmtDate(n.updated || n.created)}</span>
+      </div>
+      <div class="note-body">
+        ${bodyHasContent ? n.body : '<span class="empty-note">（沒有內文）</span>'}
+        ${imgs.length ? `<div class="imgs">${imgs.map(im => `<img src="${esc(im.url || im.dataUrl)}" loading="lazy">`).join('')}</div>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+searchInput.addEventListener('input', () => {
+  const q = searchInput.value.trim().toLowerCase();
+  document.querySelectorAll('.project').forEach(proj => {
+    if (!q) { proj.style.display = ''; proj.querySelectorAll('.task,.note').forEach(el => el.style.display = ''); return; }
+    let anyMatch = proj.dataset.search.includes(q);
+    proj.querySelectorAll('.task,.note').forEach(el => {
+      const match = el.dataset.search.includes(q);
+      el.style.display = match ? '' : 'none';
+      if (match) { anyMatch = true; if (el.classList.contains('note')) el.classList.add('open'); }
+    });
+    proj.style.display = anyMatch ? '' : 'none';
+    if (anyMatch) proj.classList.remove('collapsed');
+  });
+});
+</script>
+</body>
+</html>
