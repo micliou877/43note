@@ -497,7 +497,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/11/27 07:52";
+const BUILD_TIME = "2026/11/27 08:08";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -3370,7 +3370,6 @@ function App() {
     });
   };
   const exportToPDF = () => {
-    document.activeElement?.blur?.();
     const prev = document.title;
     document.title = activeNote?.title || '未命名筆記';
     const body = bodyRef.current;
@@ -3388,26 +3387,12 @@ function App() {
     const prevDisplay = hiddenNodes.map(n => n.style.display);
     hiddenNodes.forEach(n => { n.style.display = 'none'; });
 
-    let cleaned = false;
-    const cleanup = () => {
-      if (cleaned) return;
-      cleaned = true;
+    window.addEventListener('afterprint', () => {
       document.title = prev;
       freeImgs.forEach(img => img.classList.add('img-free'));
       hiddenNodes.forEach((n, i) => { n.style.display = prevDisplay[i]; });
-    };
-    let printed = false;
-    const onBefore = () => { printed = true; };
-    window.addEventListener('beforeprint', onBefore, { once: true });
-    window.addEventListener('afterprint', cleanup, { once: true });
+    }, { once: true });
     window.print();
-    setTimeout(() => {
-      window.removeEventListener('beforeprint', onBefore);
-      if (!printed && document.visibilityState === 'visible' && window.innerWidth <= 768) {
-        cleanup();
-        notify('若手機主畫面捷徑無法直接列印，請改用 Safari / Chrome 開啟，或點瀏覽器「分享 → 列印」存成 PDF', 'warning', 6500);
-      }
-    }, 1200);
   };
 
   const exportToWord = async () => {
@@ -6575,7 +6560,7 @@ function App() {
                     style: { ...S.ghostBtn, padding: '6px 10px' }
                   }, h(Icon, { name: 'download', size: 14 }), '匯出', h(Icon, { name: 'chevronDown', size: 12 })),
                   editorMenu === 'export' && h('div', { className: 'dropdown-menu' },
-                    h('button', { className: 'dropdown-item', onClick: () => { flushSync(() => setEditorMenu(null)); exportToPDF(); } },
+                    h('button', { className: 'dropdown-item', onClick: () => { exportToPDF(); setTimeout(() => setEditorMenu(null), 0); } },
                       h(Icon, { name: 'printer', size: 14 }), '列印 / 匯出 PDF'),
                     h('button', { className: 'dropdown-item', onClick: () => { setEditorMenu(null); exportToWord(); } },
                       h(Icon, { name: 'note', size: 14 }), '匯出 Word (.docx)'),
@@ -6584,6 +6569,14 @@ function App() {
                       h(Icon, { name: copyFeedback ? 'check' : 'copy', size: 14, color: copyFeedback ? 'var(--success)' : undefined }), copyFeedback ? '已複製全文' : '複製全文純文字')
                   )
                 ),
+
+                // 手機版直接保留一鍵「匯出 PDF」按鈕（避免 iOS 下拉選單收合時移除按鈕導致 window.print 被略過）
+                h('button', {
+                  className: 'btn-ghost mobile-only',
+                  onClick: exportToPDF,
+                  title: '匯出為 PDF',
+                  style: { ...S.ghostBtn, padding: '6px 10px' }
+                }, h(Icon, { name: 'printer', size: 14 }), '匯出 PDF'),
 
                 // A4 紙張所見即所得切換（與輸出 PDF 寬度/斷行/分頁 1:1 同步）
                 h('button', {
