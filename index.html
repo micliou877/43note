@@ -497,7 +497,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/11/27 08:08";
+const BUILD_TIME = "2026/11/27 08:21";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -2699,6 +2699,8 @@ function App() {
   const [a4Mode, setA4Mode] = useState(() => localStorage.getItem('noteA4Mode') !== '0'); // A4 所見即所得紙張模式（寬度與分頁參考線與輸出 PDF 1:1 同步）
   const [a4Guides, setA4Guides] = useState({ count: 1, lines: [] });
   const [imgLayerMenu, setImgLayerMenu] = useState(false); // 圖片浮動工具列的「圖層」下拉選單
+  const [pdfExporting, setPdfExporting] = useState(false); // 手機/PWA 直接產生 PDF 檔案中
+  const [pdfReadyModal, setPdfReadyModal] = useState(null); // { file, url, filename, pageCount }
   useEffect(() => { setImgLayerMenu(false); }, [selImg?.imgId]);
   const a4SheetRef = useRef(null);
   useEffect(() => { localStorage.setItem('noteToolbarOpen', toolbarOpen ? '1' : '0'); }, [toolbarOpen]);
@@ -3369,7 +3371,227 @@ function App() {
       setTimeout(() => setCopyFeedback(false), 1800);
     });
   };
+  const closePdfReadyModal = () => {
+    setPdfReadyModal(prev => {
+      if (prev?.url) URL.revokeObjectURL(prev.url);
+      return null;
+    });
+  };
+  // 手機 / iOS 主畫面 PWA（standalone）無法喚起原生 window.print()，
+  // 改用 html2canvas + jsPDF 直接把筆記依 A4 尺寸（210×297mm，邊界 18mm）逐頁轉成真正的 PDF 檔，
+  // 再用 iOS / Android 原生分享選單（可傳 LINE、存到檔案、AirDrop、列印）或下載開啟。
+  const exportPdfFile = async () => {
+    if (pdfExporting || !activeNote) return;
+    setPdfExporting(true);
+    notify('正在產生 PDF，請稍候…', 'info', 2500);
+    let stage = null;
+    try {
+      const [h2cMod, jspdfMod] = await Promise.all([
+        import('https://esm.sh/html2canvas@1.4.1'),
+        import('https://esm.sh/jspdf@2.5.2'),
+      ]);
+      const html2canvas = h2cMod.default || h2cMod;
+      const jsPDF = jspdfMod.jsPDF || jspdfMod.default?.jsPDF || jspdfMod.default;
+      if (typeof html2canvas !== 'function' || typeof jsPDF !== 'function') {
+        throw new Error('PDF 元件載入失敗');
+      }
+
+      const PAGE_W_MM = 210, PAGE_H_MM = 297, MARGIN_MM = 18;
+      const CONTENT_W_MM = PAGE_W_MM - MARGIN_MM * 2; // 174mm
+      const CONTENT_H_MM = PAGE_H_MM - MARGIN_MM * 2; // 261mm
+      const CONTENT_W_PX = 658; // 174mm @ 96dpi
+      const PAGE_H_PX = Math.round(CONTENT_W_PX * (CONTENT_H_MM / CONTENT_W_MM)); // ~987px
+
+      stage = document.createElement('div');
+      stage.style.cssText =
+        `position:absolute;left:-10000px;top:0;width:${CONTENT_W_PX}px;background:#ffffff;color:#1f2937;` +
+        `font-family:"Inter","Noto Sans TC",-apple-system,"PingFang TC","Microsoft JhengHei",sans-serif;` +
+        `font-size:15px;line-height:1.75;padding:0;margin:0;box-sizing:border-box;`;
+
+      const titleEl = document.createElement('h1');
+      titleEl.textContent = activeNote.title || '未命名筆記';
+      titleEl.style.cssText = 'font-size:22px;font-weight:700;line-height:1.35;color:#0f172a;margin:0 0 12px;padding:0;letter-spacing:-0.015em;';
+      stage.appendChild(titleEl);
+
+      const cloneBody = document.createElement('div');
+      cloneBody.className = 'note-body';
+      cloneBody.style.cssText =
+        'position:relative;isolation:isolate;overflow:visible;min-height:0;border:none;border-radius:0;' +
+        'padding:0;margin:0;background:#ffffff;color:#1f2937;font-size:15px;line-height:1.75;box-shadow:none;';
+      cloneBody.innerHTML = bodyRef.current ? bodyRef.current.innerHTML : toBodyHtml(activeNote.body || '');
+
+      // 照畫面展開/收合狀態列印：收合的移除、藏掉收合箭頭與選取框
+      cloneBody.querySelectorAll('[data-li-hidden="1"], .li-toggle-mark').forEach(el => el.remove());
+      cloneBody.querySelectorAll('.img-sel, .break-sel').forEach(el => { el.classList.remove('img-sel'); el.classList.remove('break-sel'); });
+
+      // 「⛔ 以下不印」標記之後全部移除
+      const stopMark = cloneBody.querySelector('.print-stop');
+      if (stopMark) {
+        collectTrailingPageBreaks(stopMark, cloneBody).forEach(n => n.remove());
+        collectNodesAfterMarker(stopMark, cloneBody).forEach(n => n.remove());
+      }
+
+      // 若有手動分頁，自由擺放圖片退回文件流以免跨頁錯位
+      const manualBreaks = Array.from(cloneBody.querySelectorAll('.page-break'));
+      if (manualBreaks.length > 0) {
+        cloneBody.querySelectorAll('img[data-inline].img-free').forEach(img => img.classList.remove('img-free'));
+      }
+      // 隱藏手動分頁條本身文字與邊框，保留 0 高度佔位元素以便量測切頁位置
+      manualBreaks.forEach(brk => {
+        brk.textContent = '';
+        brk.style.cssText = 'display:block;clear:both;height:0;padding:0;margin:0;border:none;background:transparent;overflow:hidden;';
+      });
+
+      stage.appendChild(cloneBody);
+
+      // 底部照片庫（2 欄格狀，含標註與灰階）
+      if (noteImages.length > 0) {
+        const grid = document.createElement('div');
+        grid.style.cssText = 'display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:14px;';
+        const renderedUrls = await Promise.all(noteImages.map(im => renderImageToDataUrl(im).catch(() => im.url || im.dataUrl)));
+        renderedUrls.forEach(src => {
+          if (!src) return;
+          const card = document.createElement('div');
+          card.className = 'pdf-gallery-card';
+          card.style.cssText = 'border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#ffffff;';
+          const img = document.createElement('img');
+          img.src = src;
+          img.style.cssText = 'width:100%;height:auto;display:block;';
+          card.appendChild(img);
+          grid.appendChild(card);
+        });
+        stage.appendChild(grid);
+      }
+
+      document.body.appendChild(stage);
+
+      // 把遠端 Storage 圖片轉成 dataURL，避免 iOS WebKit canvas 跨域汙染（CORS taint）
+      const blobToDataUrl = (blob) => new Promise((res, rej) => {
+        const fr = new FileReader();
+        fr.onload = () => res(fr.result);
+        fr.onerror = rej;
+        fr.readAsDataURL(blob);
+      });
+      const imgs = Array.from(stage.querySelectorAll('img'));
+      await Promise.all(imgs.map(async (img) => {
+        const src = img.getAttribute('src') || '';
+        if (src.startsWith('http://') || src.startsWith('https://')) {
+          try {
+            const resp = await fetch(src, { mode: 'cors' });
+            if (resp.ok) {
+              const dataUrl = await blobToDataUrl(await resp.blob());
+              img.setAttribute('src', dataUrl);
+            }
+          } catch {}
+        }
+        if (!img.complete) {
+          await new Promise(r => { img.onload = r; img.onerror = r; setTimeout(r, 4000); });
+        }
+      }));
+
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+      const stageRect = stage.getBoundingClientRect();
+      const totalH = Math.max(1, Math.ceil(stage.scrollHeight));
+
+      // 依手動分頁位置切成段落，每段再依 A4 頁面高度逐頁截圖（每頁獨立小 canvas，避免 iOS 記憶體上限）
+      const breakYs = manualBreaks
+        .map(el => Math.round(el.getBoundingClientRect().top - stageRect.top))
+        .filter(y => y > 4 && y < totalH - 4)
+        .sort((a, b) => a - b);
+
+      const segments = [];
+      let segStart = 0;
+      for (const by of breakYs) {
+        if (by - segStart > 4) segments.push([segStart, by]);
+        segStart = by;
+      }
+      if (totalH - segStart > 2 || segments.length === 0) segments.push([segStart, totalH]);
+
+      // 收集不可從中間腰斬的區塊位置（行、圖片、照片卡片、標題）
+      const atomicBlocks = Array.from(stage.querySelectorAll('h1, div, p, li, tr, img, .pdf-gallery-card'))
+        .filter(el => el !== cloneBody && !el.classList?.contains('page-break') && !el.classList?.contains('img-free'))
+        .map(el => {
+          const r = el.getBoundingClientRect();
+          return { top: r.top - stageRect.top, bottom: r.bottom - stageRect.top, h: r.height };
+        })
+        .filter(b => b.h > 4 && b.h < PAGE_H_PX * 0.85);
+
+      const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4', compress: true });
+      let pageCount = 0;
+
+      for (const [sStart, sEnd] of segments) {
+        let curY = sStart;
+        let guard = 0;
+        while (curY < sEnd - 2 && guard++ < 80) {
+          let nextY = Math.min(sEnd, curY + PAGE_H_PX);
+          // 避免把一行文字或一張圖片從正中間切開：若剛好跨到邊界就退到該元素頂端換頁
+          if (nextY < sEnd) {
+            let adjusted = nextY;
+            for (const b of atomicBlocks) {
+              if (b.top > curY + 40 && b.top < adjusted - 2 && b.bottom > adjusted + 2) {
+                adjusted = Math.min(adjusted, Math.floor(b.top));
+              }
+            }
+            if (adjusted > curY + 40) nextY = adjusted;
+          }
+          const sliceH = Math.max(1, Math.ceil(nextY - curY));
+          const canvas = await html2canvas(stage, {
+            x: 0,
+            y: curY,
+            width: CONTENT_W_PX,
+            height: sliceH,
+            windowWidth: CONTENT_W_PX,
+            scrollX: 0,
+            scrollY: 0,
+            scale: 1.6,
+            backgroundColor: '#ffffff',
+            useCORS: true,
+            logging: false,
+          });
+          if (pageCount > 0) pdf.addPage('a4', 'p');
+          pageCount++;
+          const imgH_mm = Math.min(CONTENT_H_MM, sliceH * (CONTENT_W_MM / CONTENT_W_PX));
+          const jpg = canvas.toDataURL('image/jpeg', 0.9);
+          pdf.addImage(jpg, 'JPEG', MARGIN_MM, MARGIN_MM, CONTENT_W_MM, imgH_mm, undefined, 'FAST');
+          // 立即釋放畫布記憶體（iOS WebKit 關鍵）
+          canvas.width = 0;
+          canvas.height = 0;
+          curY = nextY;
+        }
+      }
+
+      const blob = pdf.output('blob');
+      const safeTitle = (activeNote.title || '未命名筆記').replace(/[\\/:*?"<>|]/g, '_');
+      const filename = `${safeTitle}.pdf`;
+      const file = new File([blob], filename, { type: 'application/pdf' });
+
+      // 優先直接叫出手機原生分享面板（可一鍵傳 LINE、存到檔案、AirDrop、列印）
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: activeNote.title || '未命名筆記' });
+          notify(`已匯出 PDF（${pageCount} 頁）`, 'success', 2400);
+          return;
+        } catch (err) {
+          if (err?.name === 'AbortError') return; // 使用者主動取消
+          // 若轉檔時間較長超過 iOS 手勢時限，改跳「PDF 已產生」視窗讓使用者點一下即刻分享
+        }
+      }
+      const url = URL.createObjectURL(blob);
+      setPdfReadyModal({ file, url, filename, pageCount });
+    } catch (err) {
+      notify('產生 PDF 失敗：' + (err?.message || err), 'error', 5000);
+    } finally {
+      if (stage && stage.parentNode) stage.parentNode.removeChild(stage);
+      setPdfExporting(false);
+    }
+  };
   const exportToPDF = () => {
+    const isMobile = window.innerWidth <= 768 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    if (isMobile) {
+      exportPdfFile();
+      return;
+    }
     const prev = document.title;
     document.title = activeNote?.title || '未命名筆記';
     const body = bodyRef.current;
@@ -5451,6 +5673,47 @@ function App() {
   const globalOverlays = h(React.Fragment, null,
     h(ToastStack, { toasts, onDismiss: dismissToast }),
     h(ConfirmModal, { dialog: confirmDialog, onClose: () => setConfirmDialog(null) }),
+    pdfReadyModal && h('div', {
+      className: 'modal-overlay no-print',
+      style: { ...S.modalOverlay, zIndex: 750 },
+      onClick: (e) => e.target === e.currentTarget && closePdfReadyModal()
+    },
+      h('div', { className: 'modal-card', style: { ...S.modalCard, maxWidth: 360 } },
+        h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 } },
+          h('h3', { style: { ...S.modalTitle, margin: 0 } }, h(Icon, { name: 'printer', size: 17, color: 'var(--accent)' }), 'PDF 已產生'),
+          h('button', { className: 'btn-icon', onClick: closePdfReadyModal, title: '關閉' }, h(Icon, { name: 'x', size: 16 }))
+        ),
+        h('p', { className: 'tabular', style: { ...S.modalSub, marginBottom: 14, wordBreak: 'break-all' } },
+          `${pdfReadyModal.filename}（共 ${pdfReadyModal.pageCount} 頁）`),
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+          (navigator.canShare && navigator.canShare({ files: [pdfReadyModal.file] })) && h('button', {
+            className: 'btn-primary',
+            style: { ...S.primaryBtn, width: '100%', padding: '11px 14px' },
+            onClick: async () => {
+              try {
+                await navigator.share({ files: [pdfReadyModal.file], title: activeNote?.title || '未命名筆記' });
+                closePdfReadyModal();
+              } catch (err) {
+                if (err?.name !== 'AbortError') notify('分享失敗：' + (err?.message || err), 'error', 3500);
+              }
+            }
+          }, h(Icon, { name: 'upload', size: 15 }), '分享 / 存到檔案 / 傳 LINE'),
+          h('a', {
+            href: pdfReadyModal.url,
+            download: pdfReadyModal.filename,
+            target: '_blank',
+            rel: 'noopener',
+            className: 'btn-ghost',
+            style: { ...S.ghostBtn, width: '100%', padding: '10px 14px', textDecoration: 'none', boxSizing: 'border-box' }
+          }, h(Icon, { name: 'download', size: 15 }), '直接開啟 / 下載 PDF'),
+          h('button', {
+            className: 'btn-ghost',
+            style: { ...S.ghostBtn, width: '100%', padding: '9px 14px', color: 'var(--text-muted)' },
+            onClick: closePdfReadyModal
+          }, '關閉')
+        )
+      )
+    ),
     h(SettingsModal, {
       open: settingsOpen,
       onClose: () => setSettingsOpen(false),
@@ -6560,8 +6823,8 @@ function App() {
                     style: { ...S.ghostBtn, padding: '6px 10px' }
                   }, h(Icon, { name: 'download', size: 14 }), '匯出', h(Icon, { name: 'chevronDown', size: 12 })),
                   editorMenu === 'export' && h('div', { className: 'dropdown-menu' },
-                    h('button', { className: 'dropdown-item', onClick: () => { exportToPDF(); setTimeout(() => setEditorMenu(null), 0); } },
-                      h(Icon, { name: 'printer', size: 14 }), '列印 / 匯出 PDF'),
+                    h('button', { className: 'dropdown-item', disabled: pdfExporting, onClick: () => { exportToPDF(); setTimeout(() => setEditorMenu(null), 0); } },
+                      h(Icon, { name: 'printer', size: 14 }), pdfExporting ? '產生 PDF 中…' : '列印 / 匯出 PDF'),
                     h('button', { className: 'dropdown-item', onClick: () => { setEditorMenu(null); exportToWord(); } },
                       h(Icon, { name: 'note', size: 14 }), '匯出 Word (.docx)'),
                     h('div', { className: 'dropdown-sep' }),
@@ -6570,13 +6833,14 @@ function App() {
                   )
                 ),
 
-                // 手機版直接保留一鍵「匯出 PDF」按鈕（避免 iOS 下拉選單收合時移除按鈕導致 window.print 被略過）
+                // 手機版直接保留一鍵「匯出 PDF」按鈕（直接產生 A4 PDF 檔並開啟原生分享／儲存）
                 h('button', {
                   className: 'btn-ghost mobile-only',
+                  disabled: pdfExporting,
                   onClick: exportToPDF,
                   title: '匯出為 PDF',
-                  style: { ...S.ghostBtn, padding: '6px 10px' }
-                }, h(Icon, { name: 'printer', size: 14 }), '匯出 PDF'),
+                  style: { ...S.ghostBtn, padding: '6px 10px', opacity: pdfExporting ? 0.6 : 1 }
+                }, h(Icon, { name: 'printer', size: 14 }), pdfExporting ? '產生 PDF 中…' : '匯出 PDF'),
 
                 // A4 紙張所見即所得切換（與輸出 PDF 寬度/斷行/分頁 1:1 同步）
                 h('button', {
