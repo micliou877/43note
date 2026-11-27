@@ -1,4 +1,4 @@
-const CACHE = '43note-v14';
+const CACHE = '43note-v15';
 
 // App shell + 版本固定的 Firebase SDK（預快取，保證離線可啟動）
 const PRECACHE = [
