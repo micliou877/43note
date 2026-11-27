@@ -497,7 +497,7 @@ const firebaseConfig = {
 };
 // ════════════════════════════════════════════════════════════════
 
-const BUILD_TIME = "2026/11/27 08:33";
+const BUILD_TIME = "2026/11/27 19:04";
 // 照片改存 Storage 之後不用再為了塞進 Firestore 1MB 硬壓畫質，這兩個值調高到接近
 // 螢幕截圖（例如 Snipaste）的清晰度。仍保留基本上限，避免手機超高畫素相機拍出來的
 // 原始檔案（4000px 以上、10MB+）沒必要地佔用儲存空間和上傳時間。
@@ -3423,10 +3423,52 @@ function App() {
       const cloneBody = document.createElement('div');
       cloneBody.className = 'note-body';
       cloneBody.style.cssText =
-        `width:${CONTENT_W_PX}px;min-height:${MIN_BODY_H_PX}px;position:relative;isolation:isolate;` +
+        `width:${CONTENT_W_PX}px;min-height:${MIN_BODY_H_PX}px;position:relative;z-index:0;isolation:isolate;` +
         `overflow:visible;border:none;border-radius:0;padding:0;margin:0;background:transparent;` +
         `color:#1f2937;font-size:15px;line-height:1.75;box-shadow:none;box-sizing:border-box;`;
       cloneBody.innerHTML = bodyRef.current ? bodyRef.current.innerHTML : toBodyHtml(activeNote.body || '');
+
+      // 修正 html2canvas 對「行內元素（如帶螢光背景的 <span>）裡面包著區塊元素（<div>/<p>/<ul>/<img>）」的渲染 bug：
+      // 真實瀏覽器不會把外層 <span> 的背景色塗在裡面的 <div> 上，但 html2canvas 會把整個區塊塗成一大片實心螢光色塊蓋住文字。
+      // 由內而外拆開這種非法巢狀，把行內樣式只留在純行內／文字節點上，區塊子元素拉成平級兄弟。
+      const BLOCK_TAGS_SET = new Set(['DIV', 'P', 'UL', 'OL', 'LI', 'TABLE', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'HR']);
+      const isBlockish = (node) => node.nodeType === 1 && (
+        BLOCK_TAGS_SET.has(node.tagName) ||
+        (node.tagName === 'IMG' && node.hasAttribute('data-inline')) ||
+        node.classList?.contains('page-break') ||
+        node.classList?.contains('print-stop')
+      );
+      const hasBlockDesc = (el) => {
+        for (const c of el.childNodes) {
+          if (isBlockish(c) || (c.nodeType === 1 && hasBlockDesc(c))) return true;
+        }
+        return false;
+      };
+      for (let pass = 0; pass < 500; pass++) {
+        const inlines = Array.from(cloneBody.querySelectorAll('span, font, mark, b, i, u, s, strike, del, strong, em, a')).reverse();
+        const bad = inlines.find(el => hasBlockDesc(el));
+        if (!bad || !bad.parentNode) break;
+        const frag = document.createDocumentFragment();
+        let run = null;
+        const flush = () => { if (run && run.childNodes.length) frag.appendChild(run); run = null; };
+        for (const child of Array.from(bad.childNodes)) {
+          if (isBlockish(child) || (child.nodeType === 1 && hasBlockDesc(child))) {
+            flush();
+            if (child.nodeType === 1) {
+              if (bad.style?.color && !child.style?.color) child.style.color = bad.style.color;
+              if (bad.style?.fontSize && !child.style?.fontSize) child.style.fontSize = bad.style.fontSize;
+              if (bad.style?.fontWeight && !child.style?.fontWeight) child.style.fontWeight = bad.style.fontWeight;
+            }
+            frag.appendChild(child);
+          } else {
+            if (child.nodeType === 3 && !child.textContent.trim() && !run) continue;
+            if (!run) run = bad.cloneNode(false);
+            run.appendChild(child);
+          }
+        }
+        flush();
+        bad.parentNode.replaceChild(frag, bad);
+      }
 
       // 照畫面展開/收合狀態列印：收合的移除、藏掉收合箭頭與選取框
       cloneBody.querySelectorAll('[data-li-hidden="1"], .li-toggle-mark').forEach(el => el.remove());
